@@ -302,6 +302,9 @@ export function ViewCallAdminModal({ open, onOpenChange, callAdminId, callAdminN
                                   <span className='text-xs'>{ticket.createdAt}</span>
                                 </div>
                               </td>
+
+
+                              
                               <td className='h-10 sm:h-12 px-2 sm:px-4 align-middle'>
                                 <Badge className={getStatusColor(ticket.status)} variant='outline'>
                                   <span className='text-xs'>{ticket.status}</span>
