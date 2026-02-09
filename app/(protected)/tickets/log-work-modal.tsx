@@ -102,9 +102,7 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
   // Get scheduled visit time or default to 8:00 AM today
   const getDefaultArrivalTime = () => {
     if (ticket.scheduledVisitDate) {
-      const scheduled = ticket.scheduledVisitDate instanceof Date 
-        ? ticket.scheduledVisitDate 
-        : (ticket.scheduledVisitDate as any).toDate();
+      const scheduled = ticket.scheduledVisitDate instanceof Date ? ticket.scheduledVisitDate : (ticket.scheduledVisitDate as any).toDate();
       return new Date(scheduled);
     }
     const today = new Date();
@@ -158,11 +156,11 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
         // Load existing work logs
         try {
           const workLogsResult = await getWorkLogsForTicket(ticket.id);
-          
+
           if (workLogsResult.success && workLogsResult.workLogs && workLogsResult.workLogs.length > 0) {
             // Work logs exist, populate form with existing data
             const firstLog = workLogsResult.workLogs[0];
-            
+
             // Set visit-level data from first log (they're all the same)
             setValue('arrivalTime', firstLog.arrivalTime || getDefaultArrivalTime());
             setValue('departureTime', firstLog.departureTime || new Date());
@@ -390,7 +388,7 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
 
       if (result.success) {
         showToast.success('Work logs saved successfully');
-        
+
         // Now close the ticket
         setSubmitting(false);
         setClosingTicket(true);
@@ -697,13 +695,13 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
                       <div className='space-y-3 p-3 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700'>
                         <Label>Maintenance Recommendation (Optional)</Label>
                         <div className='flex gap-2'>
-                          <Input 
-                            type='date' 
-                            placeholder='Recommended date' 
-                            className='flex-1' 
-                            {...register(`machineWorkLogs.${machineIdx}.maintenanceRecommendation.date`, { 
-                              setValueAs: (value) => value === '' ? undefined : new Date(value)
-                            })} 
+                          <Input
+                            type='date'
+                            placeholder='Recommended date'
+                            className='flex-1'
+                            {...register(`machineWorkLogs.${machineIdx}.maintenanceRecommendation.date`, {
+                              setValueAs: (value) => (value === '' ? undefined : new Date(value)),
+                            })}
                           />
                         </div>
                         <Textarea placeholder='Recommended maintenance or next steps...' className='min-h-16' {...register(`machineWorkLogs.${machineIdx}.maintenanceRecommendation.notes`)} />

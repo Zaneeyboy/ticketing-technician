@@ -127,7 +127,7 @@ export default function TicketsPage() {
         (doc) =>
           ({
             id: doc.id,
-            ...doc.data(),
+            ...(doc.data() as Record<string, any>),
           }) as Ticket,
       );
 

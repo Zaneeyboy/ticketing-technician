@@ -51,9 +51,7 @@ export function EditTicketModal({ open, onOpenChange, ticket, onSuccess }: EditT
       let visitDate = '';
       let visitTime = '';
       if (ticket.scheduledVisitDate) {
-        const schedDate = ticket.scheduledVisitDate instanceof Date 
-          ? ticket.scheduledVisitDate 
-          : (ticket.scheduledVisitDate as any).toDate();
+        const schedDate = ticket.scheduledVisitDate instanceof Date ? ticket.scheduledVisitDate : (ticket.scheduledVisitDate as any).toDate();
         visitDate = schedDate.toISOString().split('T')[0];
         const hours = String(schedDate.getHours()).padStart(2, '0');
         const minutes = String(schedDate.getMinutes()).padStart(2, '0');
