@@ -102,7 +102,9 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
   // Get scheduled visit time or default to 8:00 AM today
   const getDefaultArrivalTime = () => {
     if (ticket.scheduledVisitDate) {
-      const scheduled = ticket.scheduledVisitDate instanceof Date ? ticket.scheduledVisitDate : (ticket.scheduledVisitDate as any).toDate?.() || new Date(ticket.scheduledVisitDate);
+      const scheduled = ticket.scheduledVisitDate instanceof Date 
+        ? ticket.scheduledVisitDate 
+        : (ticket.scheduledVisitDate as any).toDate();
       return new Date(scheduled);
     }
     const today = new Date();
