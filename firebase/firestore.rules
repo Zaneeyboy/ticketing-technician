@@ -1,0 +1,57 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function role() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin() {
+      return signedIn() && role() == 'admin';
+    }
+
+    function isCallAdmin() {
+      return signedIn() && role() == 'call_admin';
+    }
+
+    function isManagement() {
+      return signedIn() && role() == 'management';
+    }
+
+    function isTechnician() {
+      return signedIn() && role() == 'technician';
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn();
+      allow create: if signedIn();
+      allow update, delete: if isAdmin() || isCallAdmin();
+    }
+
+    match /customers/{id} {
+      allow read, write: if isAdmin() || isCallAdmin() || isManagement();
+    }
+
+    match /machines/{id} {
+      allow read, write: if isAdmin() || isManagement();
+    }
+
+    match /parts/{id} {
+      allow read, write: if isAdmin() || isManagement();
+    }
+
+    match /tickets/{id} {
+      allow read: if isAdmin() || isCallAdmin() || isManagement() || isTechnician();
+      allow create, update, delete: if isAdmin() || isCallAdmin() || isManagement();
+    }
+
+    match /machineWorkLogs/{id} {
+      allow read: if signedIn();
+      allow create, update: if isTechnician() || isAdmin() || isManagement();
+      allow delete: if isAdmin();
+    }
+  }
+}
