@@ -97,7 +97,9 @@ export default function SchedulePage() {
 
         // Only include tickets with scheduled visit dates
         if (ticketData.scheduledVisitDate) {
-          const scheduledDate = (ticketData.scheduledVisitDate as any)?.toDate?.() || new Date(ticketData.scheduledVisitDate);
+          const scheduledDate = ticketData.scheduledVisitDate instanceof Date 
+            ? ticketData.scheduledVisitDate 
+            : (ticketData.scheduledVisitDate as any).toDate();
 
           // Get customer info from first machine using the customer map
           const customerId = ticketData.machines[0]?.customerId;
