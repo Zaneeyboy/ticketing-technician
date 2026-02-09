@@ -93,7 +93,7 @@ export default function SchedulePage() {
       const visits: ScheduledVisit[] = [];
 
       for (const doc of snapshot.docs) {
-        const ticketData = { id: doc.id, ...doc.data() } as Ticket;
+        const ticketData = { id: doc.id, ...(doc.data() as Record<string, any>) } as Ticket;
 
         // Only include tickets with scheduled visit dates
         if (ticketData.scheduledVisitDate) {
