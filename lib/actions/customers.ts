@@ -80,7 +80,7 @@ export async function createCustomer(data: any) {
     const docRef = await adminDb.collection('customers').add(customerData);
 
     // Invalidate cache and revalidate paths
-    await revalidateCache([CACHE_TAGS.CUSTOMERS]);
+    await revalidateCache([CACHE_TAGS.CUSTOMERS, CACHE_TAGS.REPORTS]);
     revalidatePath('/customers');
     revalidatePath('/(protected)/(admin)/customers');
     revalidatePath('/tickets');
@@ -111,7 +111,7 @@ export async function updateCustomer(customerId: string, data: any) {
       });
 
     // Invalidate cache and revalidate paths
-    await revalidateCache([CACHE_TAGS.CUSTOMERS]);
+    await revalidateCache([CACHE_TAGS.CUSTOMERS, CACHE_TAGS.REPORTS]);
     revalidatePath('/customers');
     revalidatePath('/(protected)/(admin)/customers');
     revalidatePath('/tickets');
@@ -137,7 +137,7 @@ export async function toggleCustomerDisabled(customerId: string, isDisabled: boo
     });
 
     // Invalidate cache and revalidate paths
-    await revalidateCache([CACHE_TAGS.CUSTOMERS]);
+    await revalidateCache([CACHE_TAGS.CUSTOMERS, CACHE_TAGS.REPORTS]);
     revalidatePath('/customers');
     revalidatePath('/(protected)/(admin)/customers');
 
@@ -165,7 +165,7 @@ export async function deleteCustomer(customerId: string) {
     await adminDb.collection('customers').doc(customerId).delete();
 
     // Invalidate cache and revalidate paths
-    await revalidateCache([CACHE_TAGS.CUSTOMERS]);
+    await revalidateCache([CACHE_TAGS.CUSTOMERS, CACHE_TAGS.REPORTS]);
     revalidatePath('/customers');
     revalidatePath('/(protected)/(admin)/customers');
 

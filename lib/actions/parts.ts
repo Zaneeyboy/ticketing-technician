@@ -64,7 +64,7 @@ export async function createPart(data: any) {
     const docRef = await adminDb.collection('parts').add(partData);
 
     // Invalidate cache and revalidate paths
-    await revalidateCache([CACHE_TAGS.PARTS]);
+    await revalidateCache([CACHE_TAGS.PARTS, CACHE_TAGS.REPORTS]);
     revalidatePath('/parts');
     revalidatePath('/(protected)/(admin)/parts');
 
@@ -93,7 +93,7 @@ export async function updatePart(partId: string, data: any) {
       });
 
     // Invalidate cache and revalidate paths
-    await revalidateCache([CACHE_TAGS.PARTS]);
+    await revalidateCache([CACHE_TAGS.PARTS, CACHE_TAGS.REPORTS]);
     revalidatePath('/parts');
     revalidatePath('/(protected)/(admin)/parts');
 
@@ -126,7 +126,7 @@ export async function deletePart(partId: string) {
     await adminDb.collection('parts').doc(partId).delete();
 
     // Invalidate cache and revalidate paths
-    await revalidateCache([CACHE_TAGS.PARTS]);
+    await revalidateCache([CACHE_TAGS.PARTS, CACHE_TAGS.REPORTS]);
     revalidatePath('/parts');
     revalidatePath('/(protected)/(admin)/parts');
 
@@ -168,7 +168,7 @@ export async function updatePartQuantity(partId: string, quantityChange: number,
     });
 
     // Invalidate cache and revalidate paths
-    await revalidateCache([CACHE_TAGS.PARTS]);
+    await revalidateCache([CACHE_TAGS.PARTS, CACHE_TAGS.REPORTS]);
     revalidatePath('/parts');
     revalidatePath('/(protected)/(admin)/parts');
 

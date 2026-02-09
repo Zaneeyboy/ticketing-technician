@@ -82,7 +82,7 @@ export async function createUserAction(data: { name: string; email: string; role
     });
 
     // Invalidate cache - especially important for technician assignments
-    await revalidateCache([CACHE_TAGS.TECHNICIANS]);
+    await revalidateCache([CACHE_TAGS.TECHNICIANS, CACHE_TAGS.REPORTS]);
     revalidatePath('/users');
     revalidatePath('/(protected)/users');
     revalidatePath('/tickets');
@@ -122,7 +122,7 @@ export async function updateUserAction(uid: string, data: { name?: string; email
     await adminDb.collection('users').doc(uid).set(updateDoc, { merge: true });
 
     // Invalidate cache - role changes affect technician assignments
-    await revalidateCache([CACHE_TAGS.TECHNICIANS]);
+    await revalidateCache([CACHE_TAGS.TECHNICIANS, CACHE_TAGS.REPORTS]);
     revalidatePath('/users');
     revalidatePath('/(protected)/users');
     revalidatePath('/tickets');
@@ -152,7 +152,7 @@ export async function setUserDisabledAction(uid: string, disabled: boolean) {
     );
 
     // Invalidate cache - disabled users shouldn't appear in technician lists
-    await revalidateCache([CACHE_TAGS.TECHNICIANS]);
+    await revalidateCache([CACHE_TAGS.TECHNICIANS, CACHE_TAGS.REPORTS]);
     revalidatePath('/users');
     revalidatePath('/(protected)/users');
     revalidatePath('/tickets');
@@ -210,7 +210,7 @@ export async function deleteUserAction(uid: string) {
     await adminDb.collection('users').doc(uid).delete();
 
     // Invalidate cache - removed user shouldn't appear anywhere
-    await revalidateCache([CACHE_TAGS.TECHNICIANS]);
+    await revalidateCache([CACHE_TAGS.TECHNICIANS, CACHE_TAGS.REPORTS]);
     revalidatePath('/users');
     revalidatePath('/(protected)/users');
     revalidatePath('/tickets');

@@ -74,7 +74,7 @@ export async function createMachine(data: any) {
     const docRef = await adminDb.collection('machines').add(machineData);
 
     // Invalidate cache and revalidate paths
-    await revalidateCache([CACHE_TAGS.MACHINES]);
+    await revalidateCache([CACHE_TAGS.MACHINES, CACHE_TAGS.REPORTS]);
     revalidatePath('/machines');
     revalidatePath('/(protected)/(admin)/machines');
 
@@ -106,7 +106,7 @@ export async function updateMachine(machineId: string, data: any) {
     await adminDb.collection('machines').doc(machineId).update(updateData);
 
     // Invalidate cache and revalidate paths
-    await revalidateCache([CACHE_TAGS.MACHINES]);
+    await revalidateCache([CACHE_TAGS.MACHINES, CACHE_TAGS.REPORTS]);
     revalidatePath('/machines');
     revalidatePath('/(protected)/(admin)/machines');
 
@@ -134,7 +134,7 @@ export async function deleteMachine(machineId: string) {
     await adminDb.collection('machines').doc(machineId).delete();
 
     // Invalidate cache and revalidate paths
-    await revalidateCache([CACHE_TAGS.MACHINES]);
+    await revalidateCache([CACHE_TAGS.MACHINES, CACHE_TAGS.REPORTS]);
     revalidatePath('/machines');
     revalidatePath('/(protected)/(admin)/machines');
 
