@@ -24,10 +24,10 @@ export const db = (() => {
 
   try {
     return initializeFirestore(app, {
-      cache: persistentLocalCache({
-        tabManager: persistentSingleTabManager(),
+      localCache: persistentLocalCache({
+        tabManager: persistentSingleTabManager({}),
       }),
-    } as any);
+    });
   } catch (error) {
     // Fallback if Firestore was already initialized in this session.
     return getFirestore(app);
