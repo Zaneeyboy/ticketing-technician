@@ -98,7 +98,9 @@ export default function HQCustomersPage() {
       cell: ({ row }) => {
         const disabled = row.getValue('isDisabled') as boolean;
         return disabled ? (
-          <Badge variant='secondary' className='text-xs'>Disabled</Badge>
+          <Badge variant='secondary' className='text-xs'>
+            Disabled
+          </Badge>
         ) : (
           <Badge className='text-xs bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'>Active</Badge>
         );
@@ -152,7 +154,9 @@ export default function HQCustomersPage() {
               <Building2 className='h-4 w-4 text-primary' />
             </div>
             <div>
-              <p className='text-2xl font-bold'><CountUp value={totalCustomers} /></p>
+              <p className='text-2xl font-bold'>
+                <CountUp value={totalCustomers} />
+              </p>
               <p className='text-xs text-muted-foreground'>Total Customers</p>
             </div>
           </CardContent>
@@ -163,7 +167,9 @@ export default function HQCustomersPage() {
               <Building2 className='h-4 w-4 text-green-600' />
             </div>
             <div>
-              <p className='text-2xl font-bold text-green-700 dark:text-green-400'><CountUp value={activeCount} /></p>
+              <p className='text-2xl font-bold text-green-700 dark:text-green-400'>
+                <CountUp value={activeCount} />
+              </p>
               <p className='text-xs text-muted-foreground'>Active</p>
             </div>
           </CardContent>
@@ -174,7 +180,9 @@ export default function HQCustomersPage() {
               <Building2 className='h-4 w-4 text-slate-500' />
             </div>
             <div>
-              <p className='text-2xl font-bold text-slate-600 dark:text-slate-400'><CountUp value={disabledCount} /></p>
+              <p className='text-2xl font-bold text-slate-600 dark:text-slate-400'>
+                <CountUp value={disabledCount} />
+              </p>
               <p className='text-xs text-muted-foreground'>Disabled</p>
             </div>
           </CardContent>
@@ -183,12 +191,7 @@ export default function HQCustomersPage() {
 
       {/* Filters */}
       <div className='flex flex-wrap gap-3 items-center'>
-        <Input
-          placeholder='Search company, contact, email...'
-          value={globalFilter}
-          onChange={(e) => setGlobalFilter(e.target.value)}
-          className='max-w-xs'
-        />
+        <Input placeholder='Search company, contact, email...' value={globalFilter} onChange={(e) => setGlobalFilter(e.target.value)} className='max-w-xs' />
         <Select value={storeFilter} onValueChange={setStoreFilter}>
           <SelectTrigger className='w-48'>
             <SelectValue placeholder='All stores' />
@@ -196,7 +199,9 @@ export default function HQCustomersPage() {
           <SelectContent>
             <SelectItem value='all'>All Stores</SelectItem>
             {storeOptions.map((s) => (
-              <SelectItem key={s} value={s}>{s}</SelectItem>
+              <SelectItem key={s} value={s}>
+                {s}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -256,8 +261,12 @@ export default function HQCustomersPage() {
                   Page {table.getState().pagination.pageIndex + 1} of {Math.max(1, table.getPageCount())}
                 </span>
                 <div className='flex gap-2'>
-                  <Button variant='outline' size='sm' onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>Previous</Button>
-                  <Button variant='outline' size='sm' onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>Next</Button>
+                  <Button variant='outline' size='sm' onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>
+                    Previous
+                  </Button>
+                  <Button variant='outline' size='sm' onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>
+                    Next
+                  </Button>
                 </div>
               </div>
             </>

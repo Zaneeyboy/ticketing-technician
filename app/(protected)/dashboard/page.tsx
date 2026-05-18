@@ -467,7 +467,7 @@ export default function DashboardPage() {
                 )}
                 {user?.role === 'store_admin' && (
                   <>
-                    <p className='text-lg font-semibold'>Your store is live â€” let's get started</p>
+                    <p className='text-lg font-semibold'>Your store is live — let&apos;s get started</p>
                     <p className='text-sm text-muted-foreground'>Add your first customer, then log your first ticket to get the workflow going.</p>
                     <div className='flex gap-2 justify-center mt-2'>
                       <Button asChild size='sm'>
