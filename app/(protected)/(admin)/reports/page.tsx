@@ -4,7 +4,7 @@ import Link from 'next/link';
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { BarChart3, ClipboardList, Wrench } from 'lucide-react';
+import { BarChart3, CalendarDays, ClipboardList, Package, Users, Wrench } from 'lucide-react';
 
 const reportLinks = [
   {
@@ -24,6 +24,24 @@ const reportLinks = [
     description: 'Problem machines, repeat issues, and parts usage by customer.',
     href: '/reports/machine-health',
     icon: Wrench,
+  },
+  {
+    title: 'Tech Team Service',
+    description: 'Period breakdown by technician — scheduled visits, emergency calls, work performed, and parts used.',
+    href: '/reports/daily-service',
+    icon: Users,
+  },
+  {
+    title: 'Monthly Summary',
+    description: 'Month-by-month overview of tickets, resolution times, and service activity.',
+    href: '/reports/monthly',
+    icon: CalendarDays,
+  },
+  {
+    title: 'Parts Usage',
+    description: 'Track parts consumed across tickets — by part, technician, or customer.',
+    href: '/reports/parts-usage',
+    icon: Package,
   },
 ];
 
