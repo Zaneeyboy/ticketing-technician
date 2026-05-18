@@ -518,21 +518,13 @@ export default function MachinesPage() {
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <span tabIndex={customers.length === 0 ? 0 : -1} className={customers.length === 0 ? 'cursor-not-allowed' : ''}>
-                        <Button
-                          variant='outline'
-                          size='sm'
-                          onClick={() => setImportOpen(true)}
-                          className='gap-2'
-                          disabled={customers.length === 0}
-                        >
+                        <Button variant='outline' size='sm' onClick={() => setImportOpen(true)} className='gap-2' disabled={customers.length === 0}>
                           <Upload className='h-4 w-4' />
                           Import
                         </Button>
                       </span>
                     </TooltipTrigger>
-                    {customers.length === 0 && (
-                      <TooltipContent>Add at least one customer before importing machines.</TooltipContent>
-                    )}
+                    {customers.length === 0 && <TooltipContent>Add at least one customer before importing machines.</TooltipContent>}
                   </Tooltip>
                   <Button size='sm' onClick={openNewDialog} className='gap-2'>
                     <Plus className='h-4 w-4' />
