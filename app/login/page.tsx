@@ -38,9 +38,11 @@ export default function LoginPage() {
 
       if (result.success) {
         showToast.success('Login Successful', `Welcome back, ${userCredential.user.email}!`);
+        const isPlatformAdmin = result.role === 'super_admin' || result.role === 'manager';
+        const destination = isPlatformAdmin ? '/hq/dashboard' : '/dashboard';
         // Delay redirect to allow user to see the success toast
         setTimeout(() => {
-          router.push('/dashboard');
+          router.push(destination);
           router.refresh();
         }, 800);
       } else {

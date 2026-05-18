@@ -25,15 +25,19 @@ export async function logoutAction() {
 
 export async function createSessionAction(idToken: string) {
   try {
-    // Create session cookie (don't create user document)
+    // Verify the token to get the UID
+    const decoded = await adminAuth.verifyIdToken(idToken);
     const result = await createSession(idToken);
-    if (result.success) {
-      return { success: true };
+    if (!result.success) {
+      return { success: false as const, error: result.error };
     }
-    return { success: false, error: result.error };
+    // Return the user's role so the client can redirect to the correct dashboard
+    const userDoc = await adminDb.collection('users').doc(decoded.uid).get();
+    const role = userDoc.exists ? (userDoc.data()?.role as string) : 'technician';
+    return { success: true as const, role };
   } catch (error: any) {
     console.error('Error creating session:', error);
-    return { success: false, error: error.message || 'Failed to create session' };
+    return { success: false as const, error: error.message || 'Failed to create session' };
   }
 }
 
