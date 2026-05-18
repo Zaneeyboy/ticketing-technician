@@ -83,8 +83,8 @@ export function SignupForm() {
   return (
     <Card className='shadow-sm border-border'>
       <CardHeader className='space-y-1 pb-4'>
-        <CardTitle className='text-2xl font-bold'>Platform Setup</CardTitle>
-        <CardDescription>Create the initial Super Admin account. All other users are invited from within the platform.</CardDescription>
+        <CardTitle className='text-2xl font-bold'>Create an Account</CardTitle>
+        <CardDescription>Sign up as a Super Admin to set up your own stores and team.</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSignup} className='space-y-4'>

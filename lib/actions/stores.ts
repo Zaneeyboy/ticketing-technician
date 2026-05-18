@@ -75,6 +75,8 @@ const _getHQStatsCached = unstable_cache(
           closed = 0,
           overdue = 0;
         const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        // Active = Assigned + In Progress + Pending Parts (any non-open, non-closed status)
+        const ACTIVE_STATUSES = new Set(['Assigned', 'In Progress', 'Pending Parts']);
         ticketsSnap.docs.forEach((t) => {
           const data = t.data();
           const s = data.status;
@@ -82,7 +84,7 @@ const _getHQStatsCached = unstable_cache(
             open++;
             const createdAt = data.createdAt?.toDate?.();
             if (createdAt && createdAt < sevenDaysAgo) overdue++;
-          } else if (s === 'Assigned') assigned++;
+          } else if (ACTIVE_STATUSES.has(s)) assigned++;
           else if (s === 'Closed') closed++;
         });
         totalOpen += open;
@@ -106,7 +108,7 @@ const _getHQStatsCached = unstable_cache(
     return { totalOpen, totalAssigned, totalClosed, totalOverdue, storeCount: storesSnap.size, storeBreakdown, topStore };
   },
   ['hq-stats'],
-  { tags: [CACHE_TAGS.STORES, CACHE_TAGS.HQ_STATS, CACHE_TAGS.TICKETS], revalidate: false },
+  { tags: [CACHE_TAGS.STORES, CACHE_TAGS.HQ_STATS, CACHE_TAGS.TICKETS], revalidate: 60 },
 );
 
 const _getHQReportsCached = unstable_cache(

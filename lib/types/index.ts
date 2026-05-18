@@ -162,7 +162,7 @@ export interface TicketMachine {
 }
 
 // Ticket types
-export type TicketStatus = 'Open' | 'Assigned' | 'Closed';
+export type TicketStatus = 'Open' | 'Assigned' | 'In Progress' | 'Pending Parts' | 'Closed';
 export type TicketPriority = 'Low' | 'Medium' | 'High' | 'Urgent';
 
 export interface StatusHistoryEntry {

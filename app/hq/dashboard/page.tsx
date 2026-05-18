@@ -2,10 +2,43 @@ import { getHQStats, listStores } from '@/lib/actions/stores';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Building2, Plus, Trophy } from 'lucide-react';
+import { BarChart2, Building2, Plus, Ticket, Trophy, Users } from 'lucide-react';
 import Link from 'next/link';
 import { HQKpiCards } from './hq-kpi-cards';
 import { HQActivityFeed } from './activity-feed';
+
+const QUICK_ACTIONS = [
+  {
+    label: 'Add Store',
+    desc: 'Onboard a new location',
+    href: '/hq/stores/new',
+    icon: Plus,
+  },
+  {
+    label: 'All Stores',
+    desc: 'View and manage stores',
+    href: '/hq/stores',
+    icon: Building2,
+  },
+  {
+    label: 'Reports',
+    desc: 'Platform-wide analytics',
+    href: '/hq/reports',
+    icon: BarChart2,
+  },
+  {
+    label: 'Users',
+    desc: 'Staff and permissions',
+    href: '/hq/users',
+    icon: Users,
+  },
+  {
+    label: 'Tickets',
+    desc: 'All tickets across stores',
+    href: '/hq/tickets',
+    icon: Ticket,
+  },
+] as const;
 
 export default async function HQDashboardPage() {
   const [statsResult, storesResult] = await Promise.all([getHQStats(), listStores()]);
@@ -21,6 +54,26 @@ export default async function HQDashboardPage() {
     <div className='space-y-8'>
       {/* KPI Cards */}
       <HQKpiCards storeCount={stats.storeCount} totalOpen={stats.totalOpen} totalAssigned={stats.totalAssigned} totalClosed={stats.totalClosed} totalOverdue={stats.totalOverdue} />
+
+      {/* Quick Actions */}
+      <div>
+        <h2 className='text-lg font-semibold mb-4'>Quick Actions</h2>
+        <div className='grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3'>
+          {QUICK_ACTIONS.map(({ label, desc, href, icon: Icon }) => (
+            <Link key={href} href={href}>
+              <Card className='hover:border-primary/50 hover:bg-primary/5 transition-colors cursor-pointer h-full'>
+                <CardContent className='pt-5 pb-4 flex flex-col gap-2'>
+                  <div className='h-8 w-8 rounded-md bg-primary/10 flex items-center justify-center'>
+                    <Icon className='h-4 w-4 text-primary' />
+                  </div>
+                  <p className='font-medium text-sm leading-tight'>{label}</p>
+                  <p className='text-xs text-muted-foreground leading-snug'>{desc}</p>
+                </CardContent>
+              </Card>
+            </Link>
+          ))}
+        </div>
+      </div>
 
       {/* Empty state — no stores yet */}
       {noStores && (
@@ -41,19 +94,19 @@ export default async function HQDashboardPage() {
         </Card>
       )}
 
-      {/* Top Performer */}
       {/* Top Performer + Activity Feed */}
       {!noStores && (
         <div className='grid grid-cols-1 lg:grid-cols-2 gap-6'>
-          {stats.topStore ? (
-            <Card className='border border-yellow-200/80 dark:border-yellow-800/40 bg-yellow-50/50 dark:bg-yellow-950/20'>
-              <CardHeader className='pb-2'>
-                <CardTitle className='text-sm font-medium flex items-center gap-2'>
-                  <Trophy className='h-4 w-4 text-yellow-500' />
-                  Top Performing Store
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
+          {/* Top Performer — always rendered, empty state when no data */}
+          <Card className={stats.topStore ? 'border border-yellow-200/80 dark:border-yellow-800/40 bg-yellow-50/50 dark:bg-yellow-950/20' : ''}>
+            <CardHeader className='pb-2'>
+              <CardTitle className='text-sm font-medium flex items-center gap-2'>
+                <Trophy className='h-4 w-4 text-yellow-500' />
+                Top Performing Store
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {stats.topStore ? (
                 <div className='flex items-center justify-between'>
                   <div>
                     <p className='font-semibold'>{stats.topStore.storeName}</p>
@@ -65,11 +118,12 @@ export default async function HQDashboardPage() {
                     <Link href={`/hq/stores/${stats.topStore.storeId}`}>View</Link>
                   </Button>
                 </div>
-              </CardContent>
-            </Card>
-          ) : (
-            <div />
-          )}
+              ) : (
+                <p className='text-sm text-muted-foreground'>Stores need at least 3 tickets before a top performer is ranked.</p>
+              )}
+            </CardContent>
+          </Card>
+
           <HQActivityFeed />
         </div>
       )}
@@ -103,7 +157,7 @@ export default async function HQDashboardPage() {
                         </div>
                         <div>
                           <span className='font-medium text-yellow-500'>{s.assigned}</span>
-                          <span className='text-muted-foreground ml-1'>assigned</span>
+                          <span className='text-muted-foreground ml-1'>active</span>
                         </div>
                         <div>
                           <span className='font-medium text-green-500'>{s.closed}</span>

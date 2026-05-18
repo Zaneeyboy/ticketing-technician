@@ -39,14 +39,6 @@ export async function createSessionAction(idToken: string) {
 
 export async function signupAction(data: { email: string; password: string; name: string }) {
   try {
-    // Bootstrap guard: only allow signup when no users exist yet (first-time setup).
-    // After the initial super_admin is created, all subsequent accounts must be
-    // provisioned via the invitation system.
-    const existingUsers = await adminDb.collection('users').limit(1).get();
-    if (!existingUsers.empty) {
-      return { success: false, error: 'Account registration is closed. Contact your administrator for an invitation.' };
-    }
-
     // Create Firebase Auth user
     const userRecord = await adminAuth.createUser({
       email: data.email,
