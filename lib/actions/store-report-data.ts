@@ -141,7 +141,7 @@ const _getStoreModularReportCached = (storeId: string) =>
     [`store-modular-report-${storeId}`],
     {
       tags: [CACHE_TAGS.TICKETS, CACHE_TAGS.PARTS, CACHE_TAGS.CUSTOMERS, CACHE_TAGS.USERS, CACHE_TAGS.REPORTS],
-      revalidate: false,
+      revalidate: 60,
     },
   );
 

@@ -407,6 +407,41 @@ async function seedTestData() {
     console.log('   Part: ' + part.name);
   }
 
+  // 7.5 Associate standard parts with machines by machine type
+  const MACHINE_TYPE_PARTS: Record<string, string[]> = {
+    'iPilot Machine':            ['iPilot Cleaning Tablet', 'Solenoid Valve 3-way', 'NTC Temperature Probe'],
+    'EGRO Machine':              ['EGRO Brew Group Seal', 'EGRO Water Pump', 'EGRO Bean Hopper', 'iPilot Cleaning Tablet'],
+    'Crescendo Machine':         ['Crescendo Brew Unit', 'NTC Temperature Probe', 'Boiler Heating Element'],
+    'Rancilio Espresso Machine': ['Rancilio Portafilter Gasket', 'Solenoid Valve 3-way', 'Boiler Heating Element', 'Steam Wand Tip'],
+    'Silvia Espresso Machine':   ['Rancilio Portafilter Gasket', 'Steam Wand Tip', 'Boiler Heating Element', 'NTC Temperature Probe'],
+    'Samremo Grinder':           ['Samremo Burr Set'],
+    'BUNN Grinder':              ['BUNN Burr Set'],
+    'BUNN Kyro Grinder':         ['BUNN Kyro Burr Set'],
+    'Smartwave Brewer Machine':  ['Water Filter Cartridge'],
+    'Brewer Machine':            ['Water Filter Cartridge'],
+    'BUNN Server':               ['BUNN Server Carafe'],
+    'Nitron RMV':                ['Nitro Keg Coupler'],
+    'Water Machine':             ['Water Filter Cartridge', 'Water Machine Membrane'],
+    'Barista Tools':             ['O-Ring Kit (Assorted)'],
+  };
+  const partsByName = new Map(partDocs.map((p) => [p.name.toLowerCase(), p]));
+  console.log('\nAssociating standard parts with machines...');
+  for (const machine of machines) {
+    const standardNames = MACHINE_TYPE_PARTS[machine.type] ?? [];
+    if (standardNames.length === 0) continue;
+    const associated = standardNames
+      .map((n) => partsByName.get(n.toLowerCase()))
+      .filter((p): p is { id: string; name: string } => !!p)
+      .map((p) => ({ partId: p.id, partName: p.name, addedAt: Timestamp.now() }));
+    if (associated.length > 0) {
+      await db.collection('stores').doc(storeId).collection('machines').doc(machine.id).update({
+        associatedParts: associated,
+        updatedAt: Timestamp.now(),
+      });
+      console.log('   ' + machine.type + ' [' + machine.serialNumber + '] → ' + associated.length + ' part(s)');
+    }
+  }
+
   // 8. Create tickets with work logs
   console.log('\nCreating tickets and work logs...');
   const TICKET_COUNT = 30;
