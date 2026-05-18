@@ -352,6 +352,65 @@ export async function appendPartsToMachine(machineId: string, parts: Array<{ par
  * Replaces the full associatedParts list on a machine.
  * Used when the admin manually edits the parts list in the machine form.
  */
+// ── HQ cross-store view ────────────────────────────────────────────────────
+
+export interface HQMachineRow {
+  storeId: string;
+  storeName: string;
+  machineId: string;
+  customerId: string;
+  customerName: string;
+  type: string;
+  serialNumber: string;
+  location: string;
+  associatedPartsCount: number;
+}
+
+export async function getHQMachines(): Promise<{ success: boolean; rows: HQMachineRow[]; error?: string }> {
+  try {
+    const user = await getCurrentUser();
+    if (!user || (user.role !== 'super_admin' && user.role !== 'manager')) {
+      return { success: false, rows: [], error: 'Unauthorized' };
+    }
+
+    const storesSnap = await adminDb.collection('stores').where('status', 'in', ['active', 'onboarding']).get();
+
+    const perStore = await Promise.all(
+      storesSnap.docs.map(async (storeDoc) => {
+        const storeName: string = storeDoc.data().name ?? storeDoc.id;
+        const storeId = storeDoc.id;
+
+        // Fetch customers for this store to resolve names
+        const customersSnap = await adminDb.collection('stores').doc(storeId).collection('customers').get();
+        const customerMap = new Map<string, string>();
+        customersSnap.docs.forEach((c) => customerMap.set(c.id, c.data().companyName ?? 'Unknown'));
+
+        const machinesSnap = await adminDb.collection('stores').doc(storeId).collection('machines').orderBy('type', 'asc').get();
+        return machinesSnap.docs.map((m) => {
+          const d = m.data();
+          return {
+            storeId,
+            storeName,
+            machineId: m.id,
+            customerId: d.customerId ?? '',
+            customerName: customerMap.get(d.customerId) ?? 'Unknown',
+            type: d.type ?? '',
+            serialNumber: d.serialNumber ?? '',
+            location: d.location ?? '',
+            associatedPartsCount: Array.isArray(d.associatedParts) ? d.associatedParts.length : 0,
+          } satisfies HQMachineRow;
+        });
+      }),
+    );
+
+    const rows = perStore.flat().sort((a, b) => a.storeName.localeCompare(b.storeName) || a.type.localeCompare(b.type));
+    return { success: true, rows };
+  } catch (error: any) {
+    console.error('Error fetching HQ machines:', error);
+    return { success: false, rows: [], error: error.message };
+  }
+}
+
 export async function setMachineAssociatedParts(machineId: string, parts: Array<{ partId?: string; partName: string; addedAt: Date }>): Promise<{ success: boolean; error?: string }> {
   try {
     const user = await getCurrentUser();

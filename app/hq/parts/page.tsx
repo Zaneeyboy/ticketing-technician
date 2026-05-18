@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
-import HQLayout from '@/components/hq-layout';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -119,8 +118,7 @@ export default function HQPartsPage() {
   if (!user) return null;
 
   return (
-    <HQLayout user={{ uid: user.uid, email: user.email, name: user.name, role: user.role }}>
-      <div className='space-y-6'>
+    <div className='space-y-6'>
         {/* Header */}
         <div className='flex items-center justify-between gap-4 flex-wrap'>
           <div>
@@ -262,7 +260,6 @@ export default function HQPartsPage() {
             )}
           </CardContent>
         </Card>
-      </div>
-    </HQLayout>
+    </div>
   );
 }

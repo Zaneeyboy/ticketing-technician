@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ThemeToggle } from '@/components/theme-toggle';
 import Link from 'next/link';
-import { BarChart3, Building2, ChevronDown, LayoutDashboard, Menu, Package, Ticket, Users, X } from 'lucide-react';
+import { BarChart3, Building2, ChevronDown, LayoutDashboard, Menu, Package, Ticket, Users, Wrench, X } from 'lucide-react';
 
 interface HQLayoutProps {
   children: ReactNode;
@@ -19,6 +19,8 @@ const navItems = [
   { label: 'Stores', href: '/hq/stores', icon: Building2 },
   { label: 'Users', href: '/hq/users', icon: Users },
   { label: 'Tickets', href: '/hq/tickets', icon: Ticket },
+  { label: 'Machines', href: '/hq/machines', icon: Wrench },
+  { label: 'Customers', href: '/hq/customers', icon: Building2 },
   { label: 'Parts', href: '/hq/parts', icon: Package },
   { label: 'Reports', href: '/hq/reports', icon: BarChart3 },
 ];

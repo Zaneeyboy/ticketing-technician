@@ -242,3 +242,56 @@ export async function bulkCreateCustomers(rows: BulkCustomerRow[]): Promise<Bulk
     return { success: false, created: 0, skipped: [], errors: [], error: error.message || 'Bulk import failed' };
   }
 }
+
+// ── HQ cross-store view ────────────────────────────────────────────────────
+
+export interface HQCustomerRow {
+  storeId: string;
+  storeName: string;
+  customerId: string;
+  companyName: string;
+  contactPerson: string;
+  phone: string;
+  email: string;
+  address: string;
+  isDisabled: boolean;
+}
+
+export async function getHQCustomers(): Promise<{ success: boolean; rows: HQCustomerRow[]; error?: string }> {
+  try {
+    const user = await getCurrentUser();
+    if (!user || (user.role !== 'super_admin' && user.role !== 'manager')) {
+      return { success: false, rows: [], error: 'Unauthorized' };
+    }
+
+    const storesSnap = await adminDb.collection('stores').where('status', 'in', ['active', 'onboarding']).get();
+
+    const perStore = await Promise.all(
+      storesSnap.docs.map(async (storeDoc) => {
+        const storeName: string = storeDoc.data().name ?? storeDoc.id;
+        const storeId = storeDoc.id;
+        const customersSnap = await adminDb.collection('stores').doc(storeId).collection('customers').orderBy('companyName', 'asc').get();
+        return customersSnap.docs.map((c) => {
+          const d = c.data();
+          return {
+            storeId,
+            storeName,
+            customerId: c.id,
+            companyName: d.companyName ?? '',
+            contactPerson: d.contactPerson ?? '',
+            phone: d.phone ?? '',
+            email: d.email ?? '',
+            address: d.address ?? '',
+            isDisabled: d.isDisabled ?? false,
+          } satisfies HQCustomerRow;
+        });
+      }),
+    );
+
+    const rows = perStore.flat().sort((a, b) => a.storeName.localeCompare(b.storeName) || a.companyName.localeCompare(b.companyName));
+    return { success: true, rows };
+  } catch (error: any) {
+    console.error('Error fetching HQ customers:', error);
+    return { success: false, rows: [], error: error.message };
+  }
+}
