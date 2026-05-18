@@ -1,4 +1,4 @@
-'use server';
+﻿'use server';
 
 import { adminDb } from '@/lib/firebase/admin';
 import { getCurrentUser } from '@/lib/auth/session';
@@ -49,6 +49,7 @@ const getCachedReportBaseData = unstable_cache(
         status: data.status || 'Open',
         createdAt: toIsoString(data.createdAt),
         closedAt: toIsoString(data.closedAt),
+        scheduledVisitDate: toIsoString(data.scheduledVisitDate),
         assignedTo: data.assignedTo || null,
         assignedToName: data.assignedToName || null,
         issueDescription: data.issueDescription || null,
@@ -111,7 +112,7 @@ const getCachedReportBaseData = unstable_cache(
 
 export async function getReportBaseData(): Promise<ReportBaseData> {
   const user = await getCurrentUser();
-  if (!user || !['admin', 'management'].includes(user.role)) {
+  if (!user || !['store_admin', 'super_admin'].includes(user.role)) {
     return { tickets: [], workLogs: [], customers: [], machines: [], technicians: [], parts: [] };
   }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { User as FirebaseUser, onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase/client';
 import { doc, getDoc } from 'firebase/firestore';
@@ -42,9 +42,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           email: firebaseUser.email || '',
           name: userData.name || '',
           role: userData.role || 'technician',
+          storeId: userData.storeId ?? null,
+          storeName: userData.storeName || undefined,
           disabled,
-          createdAt: userData.createdAt || new Date(),
-          updatedAt: userData.updatedAt || new Date(),
+          createdAt: userData.createdAt?.toDate?.() ?? new Date(),
+          updatedAt: userData.updatedAt?.toDate?.() ?? new Date(),
         });
       } else {
         // User authenticated but no profile in Firestore - deny access
@@ -64,11 +66,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const refreshUser = async () => {
+  const refreshUser = useCallback(async () => {
     if (firebaseUser) {
       await fetchUserData(firebaseUser);
     }
-  };
+  }, [firebaseUser]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -91,7 +93,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => unsubscribe();
   }, []);
 
-  return <AuthContext.Provider value={{ user, firebaseUser, loading, refreshUser }}>{children}</AuthContext.Provider>;
+  const contextValue = useMemo(() => ({ user, firebaseUser, loading, refreshUser }), [user, firebaseUser, loading, refreshUser]);
+
+  return <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

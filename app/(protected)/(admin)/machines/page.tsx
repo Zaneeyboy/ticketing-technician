@@ -1,5 +1,6 @@
 'use client';
 
+import * as XLSX from 'xlsx';
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { useRouter } from 'next/navigation';
@@ -15,20 +16,255 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { ColumnDef, flexRender, getCoreRowModel, getFilteredRowModel, getPaginationRowModel, getSortedRowModel, useReactTable, SortingState } from '@tanstack/react-table';
-import { collection, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase/client';
-import { Machine, Customer } from '@/lib/types';
-import { createMachine, updateMachine, deleteMachine } from '@/lib/actions/machines';
-import { Plus, Edit2, Trash2, Eye, ArrowUpDown } from 'lucide-react';
+import { Machine, Customer, MachinePart } from '@/lib/types';
+import { getMachines, createMachine, updateMachine, deleteMachine, bulkCreateMachines, getMachineTypes, addMachineType, setMachineAssociatedParts, type BulkMachineRow } from '@/lib/actions/machines';
+import { getCustomers } from '@/lib/actions/customers';
+import { Plus, Edit2, Trash2, Eye, ArrowUpDown, Upload, Download, Wrench, X, Package, ChevronsUpDown } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Checkbox } from '@/components/ui/checkbox';
+import { getParts, type Part } from '@/lib/actions/parts';
+import { useDebounce } from '@/lib/hooks/useDebounce';
+import { PageHeader } from '@/components/page-header';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { TableSkeleton } from '@/components/skeletons/table-skeleton';
 import { Skeleton } from '@/components/ui/skeleton';
+import { BulkUploadDialog, type ParsedRow } from '@/components/bulk-upload-dialog';
+import { ExportButton } from '@/components/export-button';
 
+// ── MachineFormDialog ─────────────────────────────────────────────────────
+// Isolated so form keystrokes don't re-render the entire machines table.
+function MachineFormDialog({
+  open,
+  onOpenChange,
+  editingMachine,
+  customers,
+  machineTypes,
+  parts,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  editingMachine: Machine | null;
+  customers: Customer[];
+  machineTypes: string[];
+  parts: Part[];
+  onSaved: () => void;
+}) {
+  const [formData, setFormData] = useState({
+    customerId: '',
+    type: '' as string,
+    serialNumber: '',
+    location: '',
+    notes: '',
+  });
+  const [associatedParts, setAssociatedParts] = useState<MachinePart[]>([]);
+  const [partSearch, setPartSearch] = useState('');
+  const [partsOpen, setPartsOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  // Reset / populate form whenever the dialog opens or the target machine changes
+  useEffect(() => {
+    if (open) {
+      setError('');
+      setPartSearch('');
+      setPartsOpen(false);
+      setAssociatedParts(editingMachine?.associatedParts ?? []);
+      setFormData(
+        editingMachine
+          ? {
+              customerId: editingMachine.customerId,
+              type: editingMachine.type,
+              serialNumber: editingMachine.serialNumber,
+              location: editingMachine.location || '',
+              notes: editingMachine.notes || '',
+            }
+          : { customerId: '', type: '', serialNumber: '', location: '', notes: '' },
+      );
+    }
+  }, [open, editingMachine]);
+
+  const removePart = (idx: number) => setAssociatedParts((prev) => prev.filter((_, i) => i !== idx));
+
+  const togglePart = (part: Part) => {
+    const isSelected = associatedParts.some((ap) => ap.partId === part.id || ap.partName.toLowerCase() === part.name.toLowerCase());
+    if (isSelected) {
+      setAssociatedParts((prev) => prev.filter((ap) => ap.partId !== part.id && ap.partName.toLowerCase() !== part.name.toLowerCase()));
+    } else {
+      setAssociatedParts((prev) => [...prev, { partId: part.id, partName: part.name, addedAt: new Date() }]);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError('');
+    try {
+      if (editingMachine) {
+        const result = await updateMachine(editingMachine.id, formData);
+        if (result.success) {
+          // Save parts list separately (full replace)
+          await setMachineAssociatedParts(
+            editingMachine.id,
+            associatedParts.map((p) => ({ partId: p.partId, partName: p.partName, addedAt: p.addedAt instanceof Date ? p.addedAt : new Date() })),
+          );
+          showToast.success('Machine updated successfully');
+          onSaved();
+          onOpenChange(false);
+        } else {
+          const msg = result.error || 'Failed to update machine';
+          setError(msg);
+          showToast.error(msg);
+        }
+      } else {
+        const result = await createMachine(formData);
+        if (result.success) {
+          showToast.success('Machine created successfully');
+          onSaved();
+          onOpenChange(false);
+        } else {
+          const msg = result.error || 'Failed to create machine';
+          setError(msg);
+          showToast.error(msg);
+        }
+      }
+    } catch (err: any) {
+      const msg = err.message;
+      setError(msg);
+      showToast.error(msg);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{editingMachine ? 'Edit Machine' : 'Add New Machine'}</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className='space-y-4'>
+          <div className='space-y-2'>
+            <Label htmlFor='customerId'>Customer *</Label>
+            <Select value={formData.customerId} onValueChange={(value) => setFormData((p) => ({ ...p, customerId: value }))} required>
+              <SelectTrigger>
+                <SelectValue placeholder='Select customer' />
+              </SelectTrigger>
+              <SelectContent>
+                {customers.map((customer) => (
+                  <SelectItem key={customer.id} value={customer.id}>
+                    {customer.companyName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className='space-y-2'>
+            <Label htmlFor='type'>Machine Type *</Label>
+            <Input
+              id='type'
+              value={formData.type}
+              onChange={(e) => setFormData((p) => ({ ...p, type: e.target.value }))}
+              list='machine-types-list'
+              placeholder='Select or type a machine type…'
+              required
+            />
+            <datalist id='machine-types-list'>
+              {machineTypes.map((t) => (
+                <option key={t} value={t} />
+              ))}
+            </datalist>
+            <p className='text-xs text-muted-foreground'>Type a new value to add a custom machine type — it will be saved for future use.</p>
+          </div>
+          <div className='space-y-2'>
+            <Label htmlFor='serialNumber'>Serial Number *</Label>
+            <Input id='serialNumber' value={formData.serialNumber} onChange={(e) => setFormData((p) => ({ ...p, serialNumber: e.target.value }))} required />
+          </div>
+          <div className='space-y-2'>
+            <Label htmlFor='location'>Location</Label>
+            <Input id='location' value={formData.location} onChange={(e) => setFormData((p) => ({ ...p, location: e.target.value }))} placeholder='e.g. Main Counter, Back Room' />
+          </div>
+          <div className='space-y-2'>
+            <Label htmlFor='notes'>Notes</Label>
+            <Input id='notes' value={formData.notes} onChange={(e) => setFormData((p) => ({ ...p, notes: e.target.value }))} />
+          </div>
+
+          {/* Associated Parts */}
+          <div className='space-y-2'>
+            <Label className='flex items-center gap-1.5'>
+              <Package className='h-3.5 w-3.5' />
+              Associated Parts
+            </Label>
+            <p className='text-xs text-muted-foreground'>Parts known to belong to or be used with this machine. Also populated automatically from work logs.</p>
+            <Popover open={partsOpen} onOpenChange={setPartsOpen}>
+              <PopoverTrigger asChild>
+                <Button type='button' variant='outline' role='combobox' aria-expanded={partsOpen} className='w-full justify-between font-normal'>
+                  {associatedParts.length > 0 ? `${associatedParts.length} part${associatedParts.length !== 1 ? 's' : ''} selected` : 'Select parts…'}
+                  <ChevronsUpDown className='ml-2 h-4 w-4 shrink-0 opacity-50' />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className='p-0 w-80' align='start'>
+                <div className='flex flex-col'>
+                  <div className='p-2 border-b'>
+                    <Input placeholder='Search parts…' value={partSearch} onChange={(e) => setPartSearch(e.target.value)} className='h-8 text-sm' />
+                  </div>
+                  <div className='max-h-52 overflow-y-auto'>
+                    {parts.filter((p) => p.name.toLowerCase().includes(partSearch.toLowerCase())).length === 0 ? (
+                      <p className='p-3 text-sm text-muted-foreground text-center'>No parts found.</p>
+                    ) : (
+                      parts
+                        .filter((p) => p.name.toLowerCase().includes(partSearch.toLowerCase()))
+                        .map((part) => {
+                          const isSelected = associatedParts.some((ap) => ap.partId === part.id || ap.partName.toLowerCase() === part.name.toLowerCase());
+                          return (
+                            <button key={part.id} type='button' onClick={() => togglePart(part)} className='flex items-center gap-2.5 w-full px-3 py-2 text-sm hover:bg-accent text-left'>
+                              <Checkbox checked={isSelected} className='pointer-events-none' tabIndex={-1} />
+                              {part.name}
+                            </button>
+                          );
+                        })
+                    )}
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+            {associatedParts.length > 0 && (
+              <div className='flex flex-wrap gap-1.5 pt-1'>
+                {associatedParts.map((part, idx) => (
+                  <span key={idx} className='inline-flex items-center gap-1 rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-1 text-xs font-medium'>
+                    {part.partName}
+                    <button type='button' onClick={() => removePart(idx)} className='ml-0.5 text-slate-400 hover:text-destructive'>
+                      <X className='h-3 w-3' />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {error && <div className='text-sm text-red-500 bg-red-50 dark:bg-red-900/20 p-3 rounded'>{error}</div>}
+          <div className='flex gap-3'>
+            <Button type='submit' disabled={submitting}>
+              {submitting ? 'Saving...' : editingMachine ? 'Update' : 'Create'}
+            </Button>
+            <Button type='button' variant='outline' onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── MachinesPage ───────────────────────────────────────────────────────────────
 export default function MachinesPage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const [machines, setMachines] = useState<Machine[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [machineTypes, setMachineTypes] = useState<string[]>([]);
+  const [parts, setParts] = useState<Part[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
@@ -37,48 +273,67 @@ export default function MachinesPage() {
   const [deleteDialog, setDeleteDialog] = useState<Machine | null>(null);
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState('');
-  const [formData, setFormData] = useState({
-    customerId: '',
-    type: 'Crescendo' as 'Crescendo' | 'Espresso' | 'Grinder' | 'Other',
-    serialNumber: '',
-    location: '',
-    notes: '',
-  });
+  const debouncedGlobalFilter = useDebounce(globalFilter, 300);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
+  const [importOpen, setImportOpen] = useState(false);
+
+  // Stats
+  const typeCounts = machines.reduce<Record<string, number>>((acc, m) => {
+    acc[m.type] = (acc[m.type] || 0) + 1;
+    return acc;
+  }, {});
+
+  // Bulk upload helpers
+  const downloadTemplate = () => {
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['Serial Number', 'Machine Type', 'Customer Name', 'Location', 'Notes'],
+      ['SN-001234', 'Crescendo', 'Acme Coffee Ltd', 'Main Counter', 'Annual service due June'],
+    ]);
+    ws['!cols'] = [{ wch: 16 }, { wch: 14 }, { wch: 28 }, { wch: 20 }, { wch: 30 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Machines');
+    XLSX.writeFile(wb, 'machines-upload-template.xlsx');
+  };
+
+  const parseMachinesFile = (buffer: ArrayBuffer): { rows: ParsedRow[]; parseError?: string } => {
+    try {
+      const wb = XLSX.read(buffer, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const raw = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: '' });
+      const rows: ParsedRow[] = raw
+        .map((r) => ({
+          serialNumber: String(r['Serial Number'] ?? r['serialNumber'] ?? '').trim(),
+          type: String(r['Machine Type'] ?? r['type'] ?? 'Other').trim(),
+          customerName: String(r['Customer Name'] ?? r['customerName'] ?? '').trim(),
+          location: String(r['Location'] ?? r['location'] ?? '').trim(),
+          notes: String(r['Notes'] ?? r['notes'] ?? '').trim(),
+        }))
+        .filter((r) => r.serialNumber);
+      if (rows.length === 0) return { rows: [], parseError: 'No valid rows found. Ensure the file has a "Serial Number" column.' };
+      return { rows };
+    } catch {
+      return { rows: [], parseError: 'Failed to parse file. Use the provided template.' };
+    }
+  };
 
   useEffect(() => {
-    if (!user || !['admin', 'management', 'call_admin'].includes(user.role)) {
+    if (authLoading) return;
+    if (!user || !['store_admin', 'store_manager', 'call_admin'].includes(user.role)) {
       router.push('/dashboard');
       return;
     }
+    if (!user.storeId) return;
     loadData();
-  }, [user]);
+  }, [user, authLoading]);
 
   const loadData = async () => {
+    if (!user?.storeId) return;
     try {
-      const [machinesSnap, customersSnap] = await Promise.all([getDocs(collection(db, 'machines')), getDocs(collection(db, 'customers'))]);
-
-      const machinesData = machinesSnap.docs.map(
-        (doc) =>
-          ({
-            id: doc.id,
-            ...doc.data(),
-          }) as Machine,
-      );
-
-      const customersData = customersSnap.docs
-        .filter((doc) => !doc.data().isDisabled) // Filter out disabled customers
-        .map(
-          (doc) =>
-            ({
-              id: doc.id,
-              ...doc.data(),
-            }) as Customer,
-        );
-
-      setMachines(machinesData);
-      setCustomers(customersData);
+      const [machinesData, customersData, typesData, partsData] = await Promise.all([getMachines(), getCustomers(), getMachineTypes(), getParts()]);
+      setMachines(machinesData as unknown as Machine[]);
+      setCustomers(customersData.filter((c) => !c.isDisabled) as unknown as Customer[]);
+      setMachineTypes(typesData);
+      setParts(partsData);
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -86,54 +341,8 @@ export default function MachinesPage() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmitting(true);
-    setError('');
-
-    try {
-      let result;
-      if (editingMachine) {
-        result = await updateMachine(editingMachine.id, formData);
-        if (result.success) {
-          showToast.success('Machine updated successfully');
-          await loadData();
-          setDialogOpen(false);
-        } else {
-          const errorMsg = result.error || 'Failed to update machine';
-          setError(errorMsg);
-          showToast.error(errorMsg);
-        }
-      } else {
-        result = await createMachine(formData);
-        if (result.success) {
-          showToast.success('Machine created successfully');
-          await loadData();
-          setDialogOpen(false);
-        } else {
-          const errorMsg = result.error || 'Failed to create machine';
-          setError(errorMsg);
-          showToast.error(errorMsg);
-        }
-      }
-    } catch (err: any) {
-      const errorMsg = err.message;
-      setError(errorMsg);
-      showToast.error(errorMsg);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const handleEdit = (machine: Machine) => {
     setEditingMachine(machine);
-    setFormData({
-      customerId: machine.customerId,
-      type: machine.type,
-      serialNumber: machine.serialNumber,
-      location: machine.location || '',
-      notes: machine.notes || '',
-    });
     setDialogOpen(true);
   };
 
@@ -160,7 +369,6 @@ export default function MachinesPage() {
 
   const openNewDialog = () => {
     setEditingMachine(null);
-    setFormData({ customerId: '', type: 'Crescendo', serialNumber: '', location: '', notes: '' });
     setDialogOpen(true);
   };
 
@@ -193,6 +401,10 @@ export default function MachinesPage() {
           Crescendo: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
           Espresso: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200',
           Grinder: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+          Brewer: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+          'Cold Brew': 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200',
+          'Water Dispenser': 'bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-200',
+          'Vending Machine': 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200',
           Other: 'bg-slate-100 text-slate-800 dark:bg-slate-900 dark:text-slate-200',
         };
         return <Badge className={colorMap[type] || colorMap.Other}>{type}</Badge>;
@@ -229,7 +441,7 @@ export default function MachinesPage() {
             </TooltipTrigger>
             <TooltipContent>View machine</TooltipContent>
           </Tooltip>
-          {user?.role !== 'call_admin' && (
+          {user?.role !== 'call_admin' && user?.role !== 'store_manager' && (
             <>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -265,100 +477,123 @@ export default function MachinesPage() {
     onGlobalFilterChange: setGlobalFilter,
     state: {
       sorting,
-      globalFilter,
+      globalFilter: debouncedGlobalFilter,
     },
   });
 
-  if (!user || !['admin', 'management'].includes(user.role)) return null;
+  if (!user || !['super_admin', 'store_admin', 'store_manager', 'call_admin'].includes(user.role)) return null;
 
   return (
     <DashboardLayout>
       <div className='space-y-6'>
-        <div className='flex justify-between items-center'>
-          <div>
-            <p className='text-slate-600 dark:text-slate-400'>Manage machine inventory</p>
-          </div>
-        </div>
-
-        <div className='space-y-4'>
-          <div className='flex justify-between items-center gap-4'>
-            <Input placeholder='Search machines...' value={globalFilter} onChange={(e) => setGlobalFilter(e.target.value)} className='max-w-sm' />
-            {user?.role !== 'call_admin' && (
-              <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button onClick={openNewDialog} className='gap-2'>
+        {/* Page Header */}
+        <PageHeader
+          title='Machines'
+          description='Track and manage all registered equipment'
+          icon={Wrench}
+          actions={
+            <>
+              <ExportButton
+                data={table.getFilteredRowModel().rows.map((r) => ({
+                  ...r.original,
+                  customerName: getCustomerName(r.original.customerId),
+                }))}
+                columns={[
+                  { header: 'Customer', key: 'customerName' },
+                  { header: 'Type', key: 'type' },
+                  { header: 'Serial Number', key: 'serialNumber' },
+                  { header: 'Location', key: 'location', formatter: (v) => v ?? '' },
+                  { header: 'Notes', key: 'notes', formatter: (v) => v ?? '' },
+                ]}
+                filename='machines-export'
+                sheetName='Machines'
+                title='Machines Inventory'
+              />
+              {user?.role !== 'call_admin' && user?.role !== 'store_manager' && (
+                <>
+                  <Button variant='outline' size='sm' onClick={downloadTemplate} className='gap-2'>
+                    <Download className='h-4 w-4' />
+                    Template
+                  </Button>
+                  <Button variant='outline' size='sm' onClick={() => setImportOpen(true)} className='gap-2'>
+                    <Upload className='h-4 w-4' />
+                    Import
+                  </Button>
+                  <Button size='sm' onClick={openNewDialog} className='gap-2'>
                     <Plus className='h-4 w-4' />
                     Add Machine
                   </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>{editingMachine ? 'Edit Machine' : 'Add New Machine'}</DialogTitle>
-                  </DialogHeader>
-                  <form onSubmit={handleSubmit} className='space-y-4'>
-                    <div className='space-y-2'>
-                      <Label htmlFor='customerId'>Customer *</Label>
-                      <Select value={formData.customerId} onValueChange={(value) => setFormData({ ...formData, customerId: value })} required>
-                        <SelectTrigger>
-                          <SelectValue placeholder='Select customer' />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {customers.map((customer) => (
-                            <SelectItem key={customer.id} value={customer.id}>
-                              {customer.companyName}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className='space-y-2'>
-                      <Label htmlFor='type'>Machine Type *</Label>
-                      <Select value={formData.type} onValueChange={(value: any) => setFormData({ ...formData, type: value })} required>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value='Crescendo'>Crescendo</SelectItem>
-                          <SelectItem value='Espresso'>Espresso</SelectItem>
-                          <SelectItem value='Grinder'>Grinder</SelectItem>
-                          <SelectItem value='Other'>Other</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className='space-y-2'>
-                      <Label htmlFor='serialNumber'>Serial Number *</Label>
-                      <Input id='serialNumber' value={formData.serialNumber} onChange={(e) => setFormData({ ...formData, serialNumber: e.target.value })} required />
-                    </div>
-                    <div className='space-y-2'>
-                      <Label htmlFor='location'>Location</Label>
-                      <Input id='location' value={formData.location} onChange={(e) => setFormData({ ...formData, location: e.target.value })} placeholder='e.g. Main Counter, Back Room' />
-                    </div>
-                    <div className='space-y-2'>
-                      <Label htmlFor='notes'>Notes</Label>
-                      <Input id='notes' value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} />
-                    </div>
-                    {error && <div className='text-sm text-red-500 bg-red-50 dark:bg-red-900/20 p-3 rounded'>{error}</div>}
-                    <div className='flex gap-3'>
-                      <Button type='submit' disabled={submitting}>
-                        {submitting ? 'Saving...' : editingMachine ? 'Update' : 'Create'}
-                      </Button>
-                      <Button type='button' variant='outline' onClick={() => setDialogOpen(false)}>
-                        Cancel
-                      </Button>
-                    </div>
-                  </form>
-                </DialogContent>
-              </Dialog>
-            )}
+                </>
+              )}
+            </>
+          }
+        />
+
+        {/* Stats bar */}
+        <div className='grid grid-cols-2 lg:grid-cols-4 gap-4 stagger-children'>
+          <Card className='animate-card-enter border-t-4 border-t-primary/60 bg-linear-to-br from-primary/8 via-background to-background'>
+            <CardContent className='pt-4 sm:pt-5 px-3 sm:px-6 flex items-center gap-3'>
+              <div className='rounded-lg bg-primary/10 p-2.5'>
+                <Wrench className='h-4 w-4 text-primary' />
+              </div>
+              <div>
+                <p className='text-2xl font-bold'>{machines.length}</p>
+                <p className='text-xs text-muted-foreground'>Total Machines</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className='animate-card-enter border-t-4 border-t-purple-500/60 bg-linear-to-br from-purple-500/8 via-background to-background'>
+            <CardContent className='pt-4 sm:pt-5 px-3 sm:px-6 flex items-center gap-3'>
+              <div className='rounded-lg bg-purple-500/10 p-2.5'>
+                <Wrench className='h-4 w-4 text-purple-600' />
+              </div>
+              <div>
+                <p className='text-2xl font-bold text-purple-700 dark:text-purple-400'>{typeCounts['Crescendo'] || 0}</p>
+                <p className='text-xs text-muted-foreground'>Crescendo</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className='animate-card-enter border-t-4 border-t-amber-500/60 bg-linear-to-br from-amber-500/8 via-background to-background'>
+            <CardContent className='pt-4 sm:pt-5 px-3 sm:px-6 flex items-center gap-3'>
+              <div className='rounded-lg bg-amber-500/10 p-2.5'>
+                <Wrench className='h-4 w-4 text-amber-600' />
+              </div>
+              <div>
+                <p className='text-2xl font-bold text-amber-700 dark:text-amber-400'>{typeCounts['Espresso'] || 0}</p>
+                <p className='text-xs text-muted-foreground'>Espresso</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className='animate-card-enter border-t-4 border-t-blue-500/60 bg-linear-to-br from-blue-500/8 via-background to-background'>
+            <CardContent className='pt-4 sm:pt-5 px-3 sm:px-6 flex items-center gap-3'>
+              <div className='rounded-lg bg-blue-500/10 p-2.5'>
+                <Wrench className='h-4 w-4 text-blue-600' />
+              </div>
+              <div>
+                <p className='text-2xl font-bold text-blue-700 dark:text-blue-400'>{typeCounts['Grinder'] || 0}</p>
+                <p className='text-xs text-muted-foreground'>Grinder</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className='space-y-4 animate-fade-in stagger-4'>
+          <div className='flex flex-wrap justify-between items-center gap-3'>
+            <Input placeholder='Search machines...' value={globalFilter} onChange={(e) => setGlobalFilter(e.target.value)} className='max-w-sm' />
           </div>
 
+          <MachineFormDialog open={dialogOpen} onOpenChange={setDialogOpen} editingMachine={editingMachine} customers={customers} machineTypes={machineTypes} parts={parts} onSaved={loadData} />
+
           <Card>
-            <CardHeader>
+            <CardHeader className='flex flex-row items-center justify-between pb-3'>
               <CardTitle>All Machines</CardTitle>
+              <span className='text-sm text-muted-foreground'>
+                {table.getFilteredRowModel().rows.length} result{table.getFilteredRowModel().rows.length !== 1 ? 's' : ''}
+              </span>
             </CardHeader>
             <CardContent>
               {loading ? (
-                <div className='text-center py-8'>Loading...</div>
+                <TableSkeleton rows={8} columns={5} showHeader />
               ) : (
                 <>
                   <div className='border rounded-lg overflow-hidden'>
@@ -383,8 +618,12 @@ export default function MachinesPage() {
                           ))
                         ) : (
                           <TableRow>
-                            <TableCell colSpan={columns.length} className='h-24 text-center'>
-                              No machines found
+                            <TableCell colSpan={columns.length} className='h-36 text-center'>
+                              <div className='flex flex-col items-center gap-2 text-muted-foreground'>
+                                <Wrench className='h-8 w-8 opacity-30' />
+                                <p className='font-medium'>No machines yet</p>
+                                <p className='text-sm'>Add your first machine or import from Excel</p>
+                              </div>
                             </TableCell>
                           </TableRow>
                         )}
@@ -452,6 +691,23 @@ export default function MachinesPage() {
                   </p>
                 </div>
               )}
+              <div>
+                <Label className='text-slate-500 flex items-center gap-1.5'>
+                  <Package className='h-3.5 w-3.5' />
+                  Associated Parts
+                </Label>
+                {(viewingMachine.associatedParts?.length ?? 0) > 0 ? (
+                  <div className='flex flex-wrap gap-1.5 mt-1'>
+                    {viewingMachine.associatedParts!.map((part, idx) => (
+                      <span key={idx} className='inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-1 text-xs font-medium'>
+                        {part.partName}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className='text-sm text-muted-foreground mt-0.5'>No parts associated yet. Parts are added automatically when logged in work visits.</p>
+                )}
+              </div>
             </div>
           )}
         </DialogContent>
@@ -472,6 +728,33 @@ export default function MachinesPage() {
           </div>
         </AlertDialogContent>
       </AlertDialog>
+
+      <BulkUploadDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        entityName='Machines'
+        previewColumns={[
+          { key: 'serialNumber', label: 'Serial Number', required: true },
+          { key: 'type', label: 'Machine Type' },
+          { key: 'customerName', label: 'Customer Name' },
+          { key: 'location', label: 'Location' },
+          { key: 'notes', label: 'Notes' },
+        ]}
+        onDownloadTemplate={downloadTemplate}
+        parseFile={parseMachinesFile}
+        validateRow={(row) => {
+          const errors: Record<string, string> = {};
+          if (!String(row.serialNumber ?? '').trim()) errors.serialNumber = 'Serial number is required';
+          if (!String(row.type ?? '').trim()) errors.type = 'Machine type is required';
+          return errors;
+        }}
+        processChunk={async (rows) => {
+          const result = await bulkCreateMachines(rows as unknown as BulkMachineRow[]);
+          const allErrors = result.success ? result.errors : [...result.errors, result.error ?? 'Import failed'];
+          return { created: result.created, skipped: result.skipped, errors: allErrors };
+        }}
+        onComplete={() => loadData()}
+      />
     </DashboardLayout>
   );
 }

@@ -22,7 +22,7 @@ export function CustomerAnalysisReport({ data }: CustomerAnalysisReportProps) {
       <div className='grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4'>
         <Card>
           <CardHeader className='pb-1 sm:pb-2'>
-            <CardTitle className='text-xs sm:text-sm font-medium text-gray-600'>Customers</CardTitle>
+            <CardTitle className='text-xs sm:text-sm font-medium text-muted-foreground'>Customers</CardTitle>
           </CardHeader>
           <CardContent>
             <div className='text-xl sm:text-2xl font-bold'>{totalCustomers}</div>
@@ -31,7 +31,7 @@ export function CustomerAnalysisReport({ data }: CustomerAnalysisReportProps) {
 
         <Card>
           <CardHeader className='pb-1 sm:pb-2'>
-            <CardTitle className='text-xs sm:text-sm font-medium text-gray-600'>Avg Tickets</CardTitle>
+            <CardTitle className='text-xs sm:text-sm font-medium text-muted-foreground'>Avg Tickets</CardTitle>
           </CardHeader>
           <CardContent>
             <div className='text-xl sm:text-2xl font-bold'>{avgTicketsPerCustomer}</div>
@@ -40,21 +40,21 @@ export function CustomerAnalysisReport({ data }: CustomerAnalysisReportProps) {
 
         <Card>
           <CardHeader className='pb-1 sm:pb-2'>
-            <CardTitle className='text-xs sm:text-sm font-medium text-gray-600'>Repeat Issues</CardTitle>
+            <CardTitle className='text-xs sm:text-sm font-medium text-muted-foreground'>Repeat Issues</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className='text-xl sm:text-2xl font-bold text-orange-600'>{customersWithRepeatIssues}</div>
-            <div className='text-xs text-gray-500 mt-1'>{totalCustomers > 0 ? Math.round((customersWithRepeatIssues / totalCustomers) * 100) : 0}%</div>
+            <div className='text-xl sm:text-2xl font-bold text-primary'>{customersWithRepeatIssues}</div>
+            <div className='text-xs text-muted-foreground mt-1'>{totalCustomers > 0 ? Math.round((customersWithRepeatIssues / totalCustomers) * 100) : 0}%</div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className='pb-1 sm:pb-2'>
-            <CardTitle className='text-xs sm:text-sm font-medium text-gray-600'>Top Customer</CardTitle>
+            <CardTitle className='text-xs sm:text-sm font-medium text-muted-foreground'>Top Customer</CardTitle>
           </CardHeader>
           <CardContent>
             <div className='text-xs sm:text-sm font-semibold truncate'>{data[0]?.companyName || 'N/A'}</div>
-            <div className='text-xs text-gray-500'>{data[0]?.totalTickets || 0} tickets</div>
+            <div className='text-xs text-muted-foreground'>{data[0]?.totalTickets || 0} tickets</div>
           </CardContent>
         </Card>
       </div>
@@ -91,9 +91,9 @@ export function CustomerAnalysisReport({ data }: CustomerAnalysisReportProps) {
                     </TableCell>
                     <TableCell className='text-right text-xs sm:text-sm'>
                       {customer.repeatIssueCount > 0 ? (
-                        <Badge className='bg-orange-600 text-xs'>{customer.repeatIssueCount}</Badge>
+                        <Badge className='bg-primary text-xs'>{customer.repeatIssueCount}</Badge>
                       ) : (
-                        <Badge variant='outline' className='bg-green-50 text-green-700 text-xs'>
+                        <Badge variant='outline' className='bg-secondary/10 text-secondary text-xs'>
                           0
                         </Badge>
                       )}

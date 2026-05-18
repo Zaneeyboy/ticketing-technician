@@ -23,81 +23,55 @@ const auth = getAuth();
 
 const BATCH_SIZE = 500;
 
-// Helper function to delete all documents in a collection
-async function deleteCollection(collectionName: string) {
+// Delete all documents in a flat collection (no subcollections)
+async function deleteCollection(collectionName: string): Promise<number> {
   const collectionRef = db.collection(collectionName);
-  const query = collectionRef.limit(BATCH_SIZE);
+  let deletedCount = 0;
 
-  return new Promise<number>((resolve, reject) => {
-    deleteQueryBatch(query, resolve, reject, 0);
-  });
-}
-
-async function deleteQueryBatch(query: FirebaseFirestore.Query, resolve: (count: number) => void, reject: (error: any) => void, deletedCount: number) {
-  try {
-    const snapshot = await query.get();
-
-    if (snapshot.size === 0) {
-      resolve(deletedCount);
-      return;
-    }
+  while (true) {
+    const snapshot = await collectionRef.limit(BATCH_SIZE).get();
+    if (snapshot.size === 0) break;
 
     const batch = db.batch();
-    snapshot.docs.forEach((doc) => {
-      batch.delete(doc.ref);
-    });
+    snapshot.docs.forEach((doc) => batch.delete(doc.ref));
     await batch.commit();
-
-    const newDeletedCount = deletedCount + snapshot.size;
-
-    // Recurse on the next process tick to avoid exploding the stack
-    process.nextTick(() => {
-      deleteQueryBatch(query, resolve, reject, newDeletedCount);
-    });
-  } catch (error) {
-    reject(error);
+    deletedCount += snapshot.size;
   }
+
+  return deletedCount;
 }
 
-// Helper function to delete all users from Firebase Auth
-async function deleteAllUsers() {
+// Delete every store document AND all its subcollections using recursiveDelete
+async function deleteStoresCollection(): Promise<number> {
+  const storeDocs = await db.collection('stores').listDocuments();
+  let count = 0;
+  for (const storeRef of storeDocs) {
+    await db.recursiveDelete(storeRef);
+    count++;
+  }
+  return count;
+}
+
+// Delete ALL Firebase Auth users
+async function deleteAllAuthUsers(): Promise<number> {
   let deletedCount = 0;
   let pageToken: string | undefined;
 
-  try {
-    do {
-      const listUsersResult = await auth.listUsers(1000, pageToken);
+  do {
+    const result = await auth.listUsers(1000, pageToken);
+    for (const user of result.users) {
+      await auth.deleteUser(user.uid);
+      deletedCount++;
+    }
+    pageToken = result.pageToken;
+  } while (pageToken);
 
-      // Filter out users to keep (admin users and zanemohd2025 account)
-      const usersToDelete = listUsersResult.users.filter(
-        (user) =>
-          !user.email?.includes('admin@') && // Keep admin users
-          !user.email?.startsWith('zanemohd2025'), // Keep zanemohd2025 account
-      );
-
-      // Delete users in batches
-      for (const user of usersToDelete) {
-        await auth.deleteUser(user.uid);
-        deletedCount++;
-      }
-
-      pageToken = listUsersResult.pageToken;
-    } while (pageToken);
-
-    return deletedCount;
-  } catch (error) {
-    console.error('Error deleting users:', error);
-    throw error;
-  }
+  return deletedCount;
 }
 
 // Prompt user for confirmation
 function askConfirmation(question: string): Promise<boolean> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => {
     rl.question(question + ' (yes/no): ', (answer) => {
       rl.close();
@@ -106,54 +80,45 @@ function askConfirmation(question: string): Promise<boolean> {
   });
 }
 
-async function wipeDatabaseAndUsers() {
-  try {
-    console.log('\n⚠️  WARNING: DATABASE WIPE OPERATION ⚠️\n');
-    console.log('This will DELETE ALL DATA from:');
-    console.log('  - Firestore collections (tickets, customers, machines, parts, machineWorkLogs)');
-    console.log('  - Firebase Authentication users (except admin users and zanemohd2025 account)');
-    console.log('\nThis operation CANNOT be undone!\n');
+async function wipeDatabase() {
+  console.log('\n⚠️  WARNING: FULL DATABASE WIPE ⚠️\n');
+  console.log('This will DELETE ALL DATA including:');
+  console.log('  • Firestore: stores (+ subcollections), users, tickets, customers, machines, parts');
+  console.log('  • Firebase Auth: ALL user accounts');
+  console.log('\nAfter this you must go to /signup to create a fresh Super Admin.\n');
+  console.log('This operation CANNOT be undone!\n');
 
-    const confirmed = await askConfirmation('Are you absolutely sure you want to continue?');
-
-    if (!confirmed) {
-      console.log('\n❌ Operation cancelled by user');
-      process.exit(0);
-    }
-
-    console.log('\n🗑️  Starting database wipe...\n');
-
-    // Collections to delete
-    const collections = ['tickets', 'customers', 'machines', 'parts', 'machineWorkLogs', 'users'];
-
-    // Delete Firestore collections
-    for (const collection of collections) {
-      console.log(`   Deleting ${collection} collection...`);
-      const count = await deleteCollection(collection);
-      console.log(`   ✓ Deleted ${count} documents from ${collection}`);
-    }
-
-    // Delete Firebase Auth users
-    console.log('\n   Deleting Firebase Auth users...');
-    const userCount = await deleteAllUsers();
-    console.log(`   ✓ Deleted ${userCount} users from Firebase Auth`);
-
-    console.log('\n✅ Database wipe completed successfully!\n');
-    console.log('💡 Next steps:');
-    console.log('   Run: npm run seed\n');
-  } catch (error) {
-    console.error('\n❌ Error wiping database:', error);
-    throw error;
+  const confirmed = await askConfirmation('Are you absolutely sure you want to continue?');
+  if (!confirmed) {
+    console.log('\n❌ Cancelled');
+    process.exit(0);
   }
+
+  console.log('\n🗑️  Wiping database...\n');
+
+  // Flat collections (legacy single-tenant paths — safe to delete even if empty)
+  const flatCollections = ['users', 'tickets', 'customers', 'machines', 'parts', 'machineWorkLogs'];
+  for (const col of flatCollections) {
+    const count = await deleteCollection(col);
+    if (count > 0) console.log(`   ✓ Deleted ${count} docs from ${col}`);
+  }
+
+  // Stores + all subcollections (tickets, customers, machines, etc. nested under each store)
+  const storeCount = await deleteStoresCollection();
+  console.log(`   ✓ Deleted ${storeCount} store(s) and all their subcollections`);
+
+  // Auth users — wipe everything so the DB and Auth are in sync
+  console.log('\n   Deleting Firebase Auth users...');
+  const authCount = await deleteAllAuthUsers();
+  console.log(`   ✓ Deleted ${authCount} Auth user(s)`);
+
+  console.log('\n✅ Wipe complete. Database and Auth are fully clean.');
+  console.log('💡 Next step: visit /signup to bootstrap your Super Admin account.\n');
 }
 
-// Run the wipe function
-wipeDatabaseAndUsers()
-  .then(() => {
-    console.log('✨ Done!');
-    process.exit(0);
-  })
-  .catch((error) => {
-    console.error('Failed to wipe database:', error);
+wipeDatabase()
+  .then(() => process.exit(0))
+  .catch((err) => {
+    console.error('\n❌ Wipe failed:', err);
     process.exit(1);
   });

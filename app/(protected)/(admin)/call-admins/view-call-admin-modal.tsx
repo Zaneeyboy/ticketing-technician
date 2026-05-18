@@ -284,11 +284,11 @@ export function ViewCallAdminModal({ open, onOpenChange, callAdminId, callAdminN
                             <tr key={ticket.id} className='border-b hover:bg-muted/50 transition-colors'>
                               <td className='h-10 sm:h-12 px-2 sm:px-4 align-middle font-medium whitespace-nowrap'>{ticket.ticketNumber}</td>
                               <td className='h-10 sm:h-12 px-2 sm:px-4 align-middle hidden md:table-cell'>
-                                <div className='max-w-[150px] truncate'>{ticket.customerName}</div>
+                                <div className='max-w-37.5 truncate'>{ticket.customerName}</div>
                               </td>
                               <td className='h-10 sm:h-12 px-2 sm:px-4 align-middle hidden lg:table-cell'>
                                 {ticket.assignedToName ? (
-                                  <div className='flex items-center gap-1 max-w-[120px]'>
+                                  <div className='flex items-center gap-1 max-w-30'>
                                     <Wrench className='h-3 w-3 shrink-0 text-muted-foreground' />
                                     <span className='truncate'>{ticket.assignedToName}</span>
                                   </div>
@@ -303,8 +303,6 @@ export function ViewCallAdminModal({ open, onOpenChange, callAdminId, callAdminN
                                 </div>
                               </td>
 
-
-                              
                               <td className='h-10 sm:h-12 px-2 sm:px-4 align-middle'>
                                 <Badge className={getStatusColor(ticket.status)} variant='outline'>
                                   <span className='text-xs'>{ticket.status}</span>

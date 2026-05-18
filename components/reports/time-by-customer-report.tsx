@@ -12,6 +12,21 @@ import { useReportData } from '@/components/reports/report-data-provider';
 import type { ReportFilters as ReportFiltersState, ReportWorkLog } from '@/lib/types/reporting';
 import { formatDate } from '@/lib/utils';
 import { ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
+import { ExportButton } from '@/components/export-button';
+import { buildReportMetadata, type ExportColumn } from '@/lib/export';
+
+const CUSTOMER_EXPORT_COLUMNS: ExportColumn[] = [
+  { header: 'Customer', key: 'customer' },
+  { header: 'Date', key: 'date' },
+  { header: 'Ticket #', key: 'ticketNumber' },
+  { header: 'Technician', key: 'technician' },
+  { header: 'Machine Type', key: 'machineType' },
+  { header: 'Serial #', key: 'serialNumber' },
+  { header: 'Hours', key: 'hours' },
+  { header: 'Work Performed', key: 'workPerformed' },
+  { header: 'Outcome', key: 'outcome' },
+  { header: 'Parts Used', key: 'partsUsed' },
+];
 
 const DEFAULT_FILTERS: ReportFiltersState = {
   statuses: [],
@@ -146,6 +161,37 @@ export function TimeByCustomerReport() {
     return { rows, totalHours: hoursTotal };
   }, [data, filters, machineMap, customerMap, technicianMap, ticketMap, partsCategoryMap]);
 
+  const exportRows = useMemo(
+    () =>
+      rows.flatMap((row) =>
+        row.logs.map((log) => {
+          const machine = machineMap.get(log.machineId);
+          return {
+            customer: row.customerName,
+            date: log.logDate ? new Date(log.logDate).toLocaleDateString('en-TT') : '',
+            ticketNumber: log.ticketNumber,
+            technician: log.technicianName,
+            machineType: machine?.type ?? '',
+            serialNumber: machine?.serialNumber ?? '',
+            hours: log.hoursWorked?.toFixed(2) ?? '0.00',
+            workPerformed: log.workPerformed ?? '',
+            outcome: log.outcome ?? '',
+            partsUsed: log.partsUsed?.map((p) => `${p.partName} ×${p.quantity}`).join(', ') ?? '',
+          };
+        }),
+      ),
+    [rows, machineMap],
+  );
+
+  const exportMetadata = useMemo(
+    () =>
+      buildReportMetadata('Time by Customer Report', filters, {
+        technicians: data.technicians,
+        customers: data.customers,
+      }),
+    [filters, data.technicians, data.customers],
+  );
+
   const router = useRouter();
   const [expandedCustomers, setExpandedCustomers] = useState<Set<string>>(new Set());
   const [expandedSearch, setExpandedSearch] = useState<Map<string, string>>(new Map());
@@ -164,11 +210,20 @@ export function TimeByCustomerReport() {
 
   return (
     <div className='space-y-6'>
-      <div className='flex items-center gap-2'>
+      <div className='flex items-center justify-between gap-2'>
         <Button variant='outline' size='sm' onClick={() => router.back()} className='gap-2'>
           <ArrowLeft className='h-4 w-4' />
           Back
         </Button>
+        <ExportButton
+          data={exportRows}
+          columns={CUSTOMER_EXPORT_COLUMNS}
+          filename={`time-by-customer-${filters.startDate ?? 'all'}-to-${filters.endDate ?? 'all'}`}
+          sheetName='Time by Customer'
+          title='Time by Customer Report'
+          subtitle={exportMetadata.subtitle}
+          metadata={exportMetadata}
+        />
       </div>
 
       <ReportFilters filters={filters} onChange={setFilters} onResetAll={() => setFilters(DEFAULT_FILTERS)} technicians={data.technicians} customers={data.customers} parts={data.parts} />
@@ -271,7 +326,7 @@ export function TimeByCustomerReport() {
                         </TableCell>
                         <TableCell className='font-medium'>{row.customerName}</TableCell>
                         <TableCell className='text-right'>
-                          <Badge variant='outline' className='bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'>
+                          <Badge variant='outline' className='bg-secondary/10 dark:bg-secondary/20 text-secondary border-secondary/30'>
                             {row.totalHours.toFixed(1)}h
                           </Badge>
                         </TableCell>
@@ -283,17 +338,17 @@ export function TimeByCustomerReport() {
                         <TableCell className='text-right'>
                           <div className='flex items-center justify-end gap-1.5'>
                             {isRepeatCustomer && (
-                              <Badge variant='outline' className='text-xs bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800'>
+                              <Badge variant='outline' className='text-xs bg-accent/10 dark:bg-accent/20 text-accent border-accent/30'>
                                 Repeat
                               </Badge>
                             )}
                             {isAboveAverage && (
-                              <Badge variant='outline' className='text-xs bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'>
+                              <Badge variant='outline' className='text-xs bg-primary/10 dark:bg-primary/20 text-primary border-primary/30'>
                                 High Time
                               </Badge>
                             )}
                             {isBelowAverage && (
-                              <Badge variant='outline' className='text-xs bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'>
+                              <Badge variant='outline' className='text-xs bg-secondary/10 dark:bg-secondary/20 text-secondary border-secondary/30'>
                                 Efficient
                               </Badge>
                             )}
@@ -306,7 +361,7 @@ export function TimeByCustomerReport() {
                                 View
                               </Button>
                             </DialogTrigger>
-                            <DialogContent className='max-w-2xl lg:max-w-5xl max-h-[90vh] overflow-y-auto'>
+                            <DialogContent className='max-w-2xl lg:max-w-5xl max-h-[90vh] overflow-y-auto' aria-describedby={undefined}>
                               <DialogHeader>
                                 <DialogTitle>{row.customerName} - Work Details</DialogTitle>
                               </DialogHeader>
@@ -441,7 +496,7 @@ export function TimeByCustomerReport() {
                         ? [
                             <TableRow
                               key={`detail-${row.customerId}`}
-                              className='bg-gradient-to-b from-primary/5 to-transparent border-l-4 border-primary/30 animate-in fade-in-0 slide-in-from-top-2 duration-300'
+                              className='bg-linear-to-b from-primary/5 to-transparent border-l-4 border-primary/30 animate-in fade-in-0 slide-in-from-top-2 duration-300'
                             >
                               <TableCell colSpan={8} className='p-4'>
                                 <div className='space-y-3 animate-in fade-in-0 duration-500'>

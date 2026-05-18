@@ -7,7 +7,7 @@ export function proxy(request: NextRequest) {
 
   // Public routes
   const publicRoutes = ['/login', '/signup', '/', '/forgot-password'];
-  const isPublicRoute = publicRoutes.some((route) => pathname === route);
+  const isPublicRoute = publicRoutes.some((route) => pathname === route) || pathname.startsWith('/join');
 
   // If no session and trying to access protected route
   if (!session && !isPublicRoute) {

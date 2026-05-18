@@ -6,14 +6,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { showToast } from '@/lib/toast';
 import { createTicket, getCustomersForTickets, getMachinesForCustomer, getTechniciansForAssignment, CustomerForTicket, MachineForTicket, TechnicianForTicket } from '@/lib/actions/tickets';
-import { Upload, X, Search, Plus, Trash2 } from 'lucide-react';
-import { TicketMachine } from '@/lib/types';
+import { Upload, X, Search, Plus, Trash2, Building2, Cpu, FileText, UserCheck, ImageOff, ClipboardList } from 'lucide-react';
+import { TicketMachine, MACHINE_TYPES } from '@/lib/types';
 import { useDebounce } from '@/lib/hooks/useDebounce';
+import { ShareTicketDialog, ShareTicketData } from '@/components/share-ticket-dialog';
 
 interface CreateTicketModalProps {
   open: boolean;
@@ -25,8 +25,14 @@ interface CreateTicketModalProps {
 
 const MAX_FILES = 5;
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB in bytes
-const MACHINE_TYPES = ['Crescendo', 'Espresso', 'Grinder', 'Other'] as const;
 const PRIORITY_LEVELS = ['Low', 'Medium', 'High', 'Urgent'] as const;
+
+const PRIORITY_BADGE: Record<string, string> = {
+  Low: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400',
+  Medium: 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
+  High: 'bg-orange-500/15 text-orange-700 dark:text-orange-400',
+  Urgent: 'bg-red-500/15 text-red-700 dark:text-red-400',
+};
 
 function getLocalDateTimeString(date: Date): string {
   const year = date.getFullYear();
@@ -58,7 +64,9 @@ export function CreateTicketModal({ open, onOpenChange, onSuccess, preloadedCust
     selectedCustomerName: '',
     contactPerson: user?.name || '',
     machines: [] as TicketMachine[],
+    briefDescription: '',
     issueDescription: '',
+    internalNotes: '',
     assignedTo: '',
     assignedToName: '',
     scheduledVisitDate: '',
@@ -68,12 +76,14 @@ export function CreateTicketModal({ open, onOpenChange, onSuccess, preloadedCust
 
   const [machineForm, setMachineForm] = useState({
     machineId: '',
-    machineType: '' as (typeof MACHINE_TYPES)[number],
+    machineType: '' as string,
     serialNumber: '',
     priority: 'Medium' as (typeof PRIORITY_LEVELS)[number],
   });
 
   const [mediaFiles, setMediaFiles] = useState<File[]>([]);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [pendingShareData, setPendingShareData] = useState<ShareTicketData | null>(null);
 
   // Reset form when modal opens
   useEffect(() => {
@@ -139,7 +149,7 @@ export function CreateTicketModal({ open, onOpenChange, onSuccess, preloadedCust
           // Reset machine form
           setMachineForm({
             machineId: '',
-            machineType: '' as (typeof MACHINE_TYPES)[number],
+            machineType: '' as string,
             serialNumber: '',
             priority: 'Medium',
           });
@@ -216,7 +226,7 @@ export function CreateTicketModal({ open, onOpenChange, onSuccess, preloadedCust
     // Reset machine form
     setMachineForm({
       machineId: '',
-      machineType: '' as (typeof MACHINE_TYPES)[number],
+      machineType: '' as string,
       serialNumber: '',
       priority: 'Medium',
     });
@@ -234,7 +244,7 @@ export function CreateTicketModal({ open, onOpenChange, onSuccess, preloadedCust
   const handleMachineTypeChange = (machineId: string, newType: string) => {
     setFormData((prev) => ({
       ...prev,
-      machines: prev.machines.map((m) => (m.machineId === machineId ? { ...m, machineType: newType as (typeof MACHINE_TYPES)[number] } : m)),
+      machines: prev.machines.map((m) => (m.machineId === machineId ? { ...m, machineType: newType } : m)),
     }));
   };
 
@@ -326,9 +336,11 @@ export function CreateTicketModal({ open, onOpenChange, onSuccess, preloadedCust
 
       const result = await createTicket({
         machines: formData.machines,
+        briefDescription: formData.briefDescription || undefined,
         issueDescription: formData.issueDescription,
+        internalNotes: formData.internalNotes || undefined,
         contactPerson: formData.contactPerson,
-        assignedTo: formData.assignedTo || undefined, // Send undefined if empty
+        assignedTo: formData.assignedTo || undefined,
         scheduledVisitDate: scheduledVisitDateTime,
         createdBy: user?.uid || '',
         additionalNotes: formData.additionalNotes || undefined,
@@ -336,13 +348,28 @@ export function CreateTicketModal({ open, onOpenChange, onSuccess, preloadedCust
 
       if (result.success) {
         showToast.success(`Ticket ${result.ticketNumber} created successfully`);
+
+        // Build share data before resetting the form
+        const shareData: ShareTicketData = {
+          ticketNumber: result.ticketNumber ?? '',
+          machines: formData.machines,
+          briefDescription: formData.briefDescription || undefined,
+          issueDescription: formData.issueDescription,
+          contactPerson: formData.contactPerson,
+          assignedToName: formData.assignedToName || null,
+          scheduledVisitDate: scheduledVisitDateTime,
+          status: formData.assignedTo ? 'Assigned' : 'Open',
+        };
+
         // Reset form
         setFormData({
           selectedCustomerId: '',
           selectedCustomerName: '',
           contactPerson: user?.name || '',
           machines: [],
+          briefDescription: '',
           issueDescription: '',
+          internalNotes: '',
           assignedTo: '',
           assignedToName: '',
           scheduledVisitDate: '',
@@ -351,15 +378,18 @@ export function CreateTicketModal({ open, onOpenChange, onSuccess, preloadedCust
         });
         setMachineForm({
           machineId: '',
-          machineType: '' as (typeof MACHINE_TYPES)[number],
+          machineType: '' as string,
           serialNumber: '',
           priority: 'Medium',
         });
         setMediaFiles([]);
         setCustomerSearch('');
         setTechnicianSearch('');
+
+        // Close create modal, then open share dialog
         onOpenChange(false);
-        onSuccess?.();
+        setPendingShareData(shareData);
+        setShareOpen(true);
       } else {
         showToast.error(result.error || 'Failed to create ticket');
       }
@@ -374,39 +404,53 @@ export function CreateTicketModal({ open, onOpenChange, onSuccess, preloadedCust
   if (!user) return null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className='sm:max-w-4xl max-h-[95vh] overflow-y-auto'>
-        <DialogHeader>
-          <DialogTitle>Create Service Ticket</DialogTitle>
-          <DialogDescription>Fill in the service call details to create a new ticket</DialogDescription>
-        </DialogHeader>
-
-        {loading && (
-          <div className='bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-4'>
-            <p className='text-sm text-blue-700 dark:text-blue-200 font-medium'>Loading form data...</p>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className='space-y-8 py-4' style={{ display: loading ? 'none' : 'block' }}>
-          {/* Customer Selection */}
-          <div className='space-y-4 pb-6 border-b border-primary/20'>
-            <div className='flex items-center gap-2 bg-linear-to-r from-primary/10 to-transparent p-3 rounded-lg border-l-4 border-primary'>
-              <h3 className='font-semibold text-base text-primary'>Customer & Contact Details</h3>
-              <span className='text-xs bg-primary text-primary-foreground px-2 py-0.5 rounded'>Required</span>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className='sm:max-w-3xl max-h-[92vh] overflow-y-auto'>
+          <DialogHeader className='pb-4 border-b border-border'>
+            <div className='flex items-center gap-3 pr-6'>
+              <div className='p-2 rounded-xl bg-primary/10 shrink-0'>
+                <ClipboardList className='h-5 w-5 text-primary' />
+              </div>
+              <div>
+                <DialogTitle className='text-lg font-bold'>Create Service Ticket</DialogTitle>
+                <DialogDescription className='mt-0.5 text-sm'>Log a new service call and assign it to your team</DialogDescription>
+              </div>
             </div>
+          </DialogHeader>
 
-            <div className='relative'>
-              <Label htmlFor='customer' className='mb-2 flex items-center gap-1'>
-                Customer
-                <span className='text-primary font-bold'>*</span>
-              </Label>
-              <div className='relative mt-1'>
+          {loading && (
+            <div className='flex items-center justify-center py-12'>
+              <div className='text-center space-y-3'>
+                <div className='h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto' />
+                <p className='text-sm text-muted-foreground'>Loading form data…</p>
+              </div>
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className='space-y-8 pt-4' style={{ display: loading ? 'none' : undefined }}>
+            {/* ── 1. Customer & Contact ── */}
+            <section className='space-y-4'>
+              <div className='flex items-center justify-between'>
+                <div className='flex items-center gap-2'>
+                  <Building2 className='h-4 w-4 text-primary' />
+                  <h3 className='text-sm font-semibold text-foreground'>Customer &amp; Contact</h3>
+                </div>
+                <span className='text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-primary/10 text-primary'>Required</span>
+              </div>
+              <div className='h-px bg-border' />
+
+              {/* Customer search */}
+              <div className='space-y-1.5'>
+                <Label htmlFor='customer' className='text-sm font-medium'>
+                  Customer <span className='text-primary'>*</span>
+                </Label>
                 <div className='relative'>
-                  <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400' />
+                  <Search className='absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none' />
                   <Input
                     id='customer'
                     type='text'
-                    placeholder='Search customer by company name...'
+                    placeholder='Search by company name…'
                     value={customerSearch || formData.selectedCustomerName}
                     onChange={(e) => {
                       setCustomerSearch(e.target.value);
@@ -414,414 +458,423 @@ export function CreateTicketModal({ open, onOpenChange, onSuccess, preloadedCust
                     }}
                     onFocus={() => setShowCustomerDropdown(true)}
                     className='pl-9'
+                    autoComplete='off'
                   />
-                </div>
-
-                {showCustomerDropdown && (filteredCustomers.length > 0 || customerSearch) && (
-                  <Card className='absolute top-full left-0 right-0 mt-1 z-50 border shadow-lg'>
-                    <CardContent className='p-0 max-h-48 overflow-y-auto'>
+                  {showCustomerDropdown && (filteredCustomers.length > 0 || customerSearch) && (
+                    <div className='absolute top-full left-0 right-0 mt-1 z-50 bg-popover border border-border rounded-lg shadow-lg overflow-hidden max-h-52 overflow-y-auto'>
                       {filteredCustomers.length > 0 ? (
                         filteredCustomers.map((customer) => (
                           <button
                             key={customer.id}
                             type='button'
                             onClick={() => handleCustomerSelect(customer.id, customer.companyName, customer.contactPerson)}
-                            className='w-full text-left px-4 py-2 hover:bg-slate-100 dark:hover:bg-slate-800 border-b last:border-b-0'
+                            className='w-full text-left px-4 py-2.5 hover:bg-accent text-sm transition-colors border-b border-border last:border-b-0 cursor-pointer'
                           >
-                            <div className='font-medium'>{customer.companyName}</div>
-                            <div className='text-xs text-slate-500'>Contact: {customer.contactPerson}</div>
+                            <div className='font-medium text-foreground'>{customer.companyName}</div>
+                            <div className='text-xs text-muted-foreground mt-0.5'>{customer.contactPerson}</div>
                           </button>
                         ))
                       ) : (
-                        <div className='px-4 py-2 text-sm text-slate-500'>No customers found</div>
+                        <div className='px-4 py-3 text-sm text-muted-foreground'>No customers match your search</div>
                       )}
-                    </CardContent>
-                  </Card>
+                    </div>
+                  )}
+                </div>
+                {formData.selectedCustomerName && (
+                  <div className='flex items-center justify-between bg-primary/8 border border-primary/20 rounded-lg px-3.5 py-2.5'>
+                    <div className='flex items-center gap-2'>
+                      <div className='h-1.5 w-1.5 rounded-full bg-primary' />
+                      <span className='text-sm font-medium text-primary'>{formData.selectedCustomerName}</span>
+                    </div>
+                    <button
+                      type='button'
+                      onClick={() => {
+                        setFormData((prev) => ({ ...prev, selectedCustomerId: '', selectedCustomerName: '', machines: [] }));
+                        setCustomerSearch('');
+                      }}
+                      className='text-muted-foreground hover:text-foreground transition-colors cursor-pointer'
+                    >
+                      <X className='h-3.5 w-3.5' />
+                    </button>
+                  </div>
                 )}
               </div>
 
-              {formData.selectedCustomerName && (
-                <div className='mt-2 flex items-center justify-between bg-primary/10 border border-primary/30 rounded-lg p-3 shadow-sm'>
-                  <div className='flex items-center gap-2'>
-                    <div className='h-2 w-2 bg-primary rounded-full animate-pulse'></div>
-                    <span className='text-sm font-semibold text-primary'>{formData.selectedCustomerName}</span>
-                  </div>
-                  <button
-                    type='button'
-                    onClick={() => {
-                      setFormData((prev) => ({
-                        ...prev,
-                        selectedCustomerId: '',
-                        selectedCustomerName: '',
-                        machines: [],
-                      }));
-                      setCustomerSearch('');
-                    }}
-                    className='text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                  >
-                    <X className='h-4 w-4' />
-                  </button>
+              {/* Contact person */}
+              <div className='space-y-1.5'>
+                <Label htmlFor='contactPerson' className='text-sm font-medium'>
+                  Reporting Contact <span className='text-primary'>*</span>
+                </Label>
+                <Input
+                  id='contactPerson'
+                  value={formData.contactPerson}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, contactPerson: e.target.value }))}
+                  placeholder='Name of the client contact who reported the issue'
+                />
+                <p className='text-xs text-muted-foreground'>Enter the person at the client site who reported this issue — not necessarily who created the ticket.</p>
+              </div>
+            </section>
+
+            {/* ── 2. Machines ── */}
+            <section className='space-y-4'>
+              <div className='flex items-center justify-between'>
+                <div className='flex items-center gap-2'>
+                  <Cpu className='h-4 w-4 text-primary' />
+                  <h3 className='text-sm font-semibold text-foreground'>Machines</h3>
+                </div>
+                <span className='text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-primary/10 text-primary'>Required</span>
+              </div>
+              <div className='h-px bg-border' />
+
+              {/* No customer selected */}
+              {!formData.selectedCustomerId && (
+                <div className='flex items-center gap-3 bg-muted/50 border border-border rounded-lg px-4 py-5'>
+                  <Cpu className='h-5 w-5 text-muted-foreground shrink-0' />
+                  <p className='text-sm text-muted-foreground'>Select a customer above to add machines to this ticket.</p>
                 </div>
               )}
-            </div>
 
-            <div>
-              <Label htmlFor='contactPerson' className='mb-2 flex items-center gap-1'>
-                Person Reporting Issue (Client Contact)
-                <span className='text-primary font-bold'>*</span>
-              </Label>
-              <Input
-                id='contactPerson'
-                value={formData.contactPerson}
-                onChange={(e) => setFormData((prev) => ({ ...prev, contactPerson: e.target.value }))}
-                placeholder='Name of person from client who reported the issue'
-                className='mt-1 border-primary/30 focus:border-primary'
-              />
-              <p className='text-xs text-slate-500 mt-1'>This is separate from who created the ticket. Enter the actual person from the client who reported the issue.</p>
-            </div>
-          </div>
+              {formData.selectedCustomerId && (
+                <>
+                  {/* Add machine panel */}
+                  <div className='bg-muted/40 border border-border rounded-xl p-4 space-y-3'>
+                    <p className='text-xs font-semibold text-muted-foreground uppercase tracking-wider'>Add Machine</p>
 
-          {/* Machine Details - Selection and List */}
-          {!formData.selectedCustomerId && (
-            <div className='space-y-4 pb-6 border-b border-dashed border-slate-300 dark:border-slate-600'>
-              <div className='flex items-center gap-2 bg-slate-50 dark:bg-slate-900 p-3 rounded-lg border-l-4 border-slate-300 dark:border-slate-600 opacity-60'>
-                <h3 className='font-semibold text-base text-slate-500'>Machine Details</h3>
-                <span className='text-xs bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded'>Awaiting Customer Selection</span>
-              </div>
-              <div className='bg-slate-50 dark:bg-slate-900 p-6 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 text-center'>
-                <p className='text-sm text-slate-500 dark:text-slate-400'>Please select a customer above to add machines to this ticket</p>
-              </div>
-            </div>
-          )}
-
-          {formData.selectedCustomerId && (
-            <div className='space-y-4 pb-6 border-b border-primary/20'>
-              <div className='flex items-center gap-2 bg-linear-to-r from-primary/10 to-transparent p-3 rounded-lg border-l-4 border-primary'>
-                <h3 className='font-semibold text-base text-primary'>Machine Details</h3>
-                <span className='text-xs bg-primary text-primary-foreground px-2 py-0.5 rounded'>Required</span>
-              </div>
-
-              {/* Add Machine Section */}
-              <div className='bg-amber-50/50 dark:bg-amber-950/20 p-4 rounded-lg border border-amber-200/50 dark:border-amber-800/30 space-y-3'>
-                <p className='text-sm font-medium text-amber-900 dark:text-amber-100'>Add Machines to Ticket</p>
-
-                <div>
-                  <Label htmlFor='machine' className='mb-2'>
-                    Select Machine
-                  </Label>
-                  <Select
-                    value={machineForm.machineId}
-                    onValueChange={(value) => {
-                      const selected = customerMachines.find((m) => m.id === value);
-                      setMachineForm((prev) => ({
-                        ...prev,
-                        machineId: value,
-                        machineType: (selected?.type || '') as (typeof MACHINE_TYPES)[number],
-                        serialNumber: selected?.serialNumber || '',
-                      }));
-                    }}
-                  >
-                    <SelectTrigger id='machine' className='mt-1'>
-                      <SelectValue placeholder={customerMachines.length === 0 ? 'No machines for customer' : 'Select machine'} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {customerMachines.map((machine) => (
-                        <SelectItem key={machine.id} value={machine.id}>
-                          {machine.type} - {machine.serialNumber}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {machineForm.machineId && (
-                  <>
-                    <div className='grid grid-cols-2 gap-3'>
-                      <div>
-                        <Label className='text-xs'>Machine Type</Label>
-                        <Input value={machineForm.machineType} disabled className='mt-1 text-sm bg-slate-100 dark:bg-slate-800' />
-                      </div>
-                      <div>
-                        <Label className='text-xs'>Serial Number</Label>
-                        <Input value={machineForm.serialNumber} disabled className='mt-1 text-sm bg-slate-100 dark:bg-slate-800' />
-                      </div>
-                    </div>
-
-                    <div>
-                      <Label htmlFor='priority' className='text-xs'>
-                        Priority for this Machine
+                    <div className='space-y-1.5'>
+                      <Label htmlFor='machine' className='text-xs font-medium'>
+                        Select Machine
                       </Label>
-                      <Select value={machineForm.priority} onValueChange={(value) => setMachineForm((prev) => ({ ...prev, priority: value as (typeof PRIORITY_LEVELS)[number] }))}>
-                        <SelectTrigger id='priority' className='mt-1'>
-                          <SelectValue />
+                      <Select
+                        value={machineForm.machineId}
+                        onValueChange={(value) => {
+                          const selected = customerMachines.find((m) => m.id === value);
+                          setMachineForm((prev) => ({
+                            ...prev,
+                            machineId: value,
+                            machineType: selected?.type || '',
+                            serialNumber: selected?.serialNumber || '',
+                          }));
+                        }}
+                      >
+                        <SelectTrigger id='machine'>
+                          <SelectValue placeholder={customerMachines.length === 0 ? 'No machines for this customer' : 'Choose a machine…'} />
                         </SelectTrigger>
                         <SelectContent>
-                          {PRIORITY_LEVELS.map((level) => (
-                            <SelectItem key={level} value={level}>
-                              {level}
+                          {customerMachines.map((machine) => (
+                            <SelectItem key={machine.id} value={machine.id}>
+                              {machine.type} — {machine.serialNumber}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     </div>
 
-                    <Button type='button' onClick={handleAddMachine} className='w-full mt-2 bg-primary hover:bg-primary/90 text-primary-foreground shadow-md hover:shadow-lg transition-all'>
-                      <Plus className='h-4 w-4 mr-2' />
-                      Add Machine to Ticket
-                    </Button>
-                  </>
-                )}
-              </div>
-
-              {/* Machines List */}
-              {formData.machines.length === 0 && (
-                <div className='bg-amber-50 dark:bg-amber-950/20 p-4 rounded-lg border border-dashed border-amber-300 dark:border-amber-700'>
-                  <p className='text-sm text-amber-800 dark:text-amber-200 text-center'>⚠️ No machines added yet. Please add at least one machine to create this ticket.</p>
-                </div>
-              )}
-
-              {formData.machines.length > 0 && (
-                <div className='space-y-3 bg-primary/5 p-4 rounded-lg border border-primary/20'>
-                  <div className='flex items-center gap-2'>
-                    <div className='h-2 w-2 bg-primary rounded-full'></div>
-                    <p className='text-sm font-semibold text-primary'>{formData.machines.length} machine(s) in ticket</p>
-                  </div>
-                  <div className='space-y-2'>
-                    {formData.machines.map((machine, index) => (
-                      <div key={index} className='flex items-center justify-between bg-white dark:bg-slate-950 border border-primary/20 p-3 rounded-lg shadow-sm hover:shadow-md transition-shadow'>
-                        <div className='flex-1'>
-                          <p className='text-sm font-medium'>
-                            {machine.machineType} - {machine.serialNumber}
-                          </p>
-                          <div className='flex gap-4 mt-1'>
-                            <div>
-                              <label className='text-xs text-slate-600 dark:text-slate-400'>Type:</label>
-                              <Select value={machine.machineType} onValueChange={(value) => handleMachineTypeChange(machine.machineId, value)}>
-                                <SelectTrigger className='h-7 w-32 text-xs mt-0.5'>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {MACHINE_TYPES.map((type) => (
-                                    <SelectItem key={type} value={type}>
-                                      {type}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div>
-                              <label className='text-xs text-slate-600 dark:text-slate-400'>Priority:</label>
-                              <Select value={machine.priority} onValueChange={(value) => handleMachinePriorityChange(machine.machineId, value)}>
-                                <SelectTrigger className='h-7 w-32 text-xs mt-0.5'>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {PRIORITY_LEVELS.map((level) => (
-                                    <SelectItem key={level} value={level}>
-                                      {level}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
+                    {machineForm.machineId && (
+                      <>
+                        <div className='grid grid-cols-2 gap-3'>
+                          <div className='space-y-1.5'>
+                            <Label className='text-xs font-medium'>Machine Type</Label>
+                            <Input value={machineForm.machineType} disabled className='text-sm bg-background' />
+                          </div>
+                          <div className='space-y-1.5'>
+                            <Label className='text-xs font-medium'>Serial Number</Label>
+                            <Input value={machineForm.serialNumber} disabled className='text-sm bg-background' />
                           </div>
                         </div>
-                        <button type='button' onClick={() => handleRemoveMachine(index)} className='text-slate-500 hover:text-red-600 ml-2'>
-                          <Trash2 className='h-4 w-4' />
-                        </button>
-                      </div>
-                    ))}
+
+                        <div className='space-y-1.5'>
+                          <Label htmlFor='priority' className='text-xs font-medium'>
+                            Priority
+                          </Label>
+                          <Select value={machineForm.priority} onValueChange={(value) => setMachineForm((prev) => ({ ...prev, priority: value as (typeof PRIORITY_LEVELS)[number] }))}>
+                            <SelectTrigger id='priority'>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {PRIORITY_LEVELS.map((level) => (
+                                <SelectItem key={level} value={level}>
+                                  {level}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <Button type='button' onClick={handleAddMachine} className='w-full'>
+                          <Plus className='h-4 w-4' />
+                          Add Machine to Ticket
+                        </Button>
+                      </>
+                    )}
                   </div>
-                </div>
-              )}
-            </div>
-          )}
 
-          {/* Issue Description */}
-          <div className='space-y-4 pb-6 border-b border-primary/20'>
-            <div className='flex items-center gap-2 bg-linear-to-r from-primary/10 to-transparent p-3 rounded-lg border-l-4 border-primary'>
-              <h3 className='font-semibold text-base text-primary'>Issue Details</h3>
-              <span className='text-xs bg-primary text-primary-foreground px-2 py-0.5 rounded'>Required</span>
-            </div>
+                  {/* Machine list */}
+                  {formData.machines.length === 0 && (
+                    <div className='border border-dashed border-border rounded-lg px-4 py-5 text-center'>
+                      <p className='text-sm text-muted-foreground'>No machines added yet — add at least one to create the ticket.</p>
+                    </div>
+                  )}
 
-            <div>
-              <Label htmlFor='issueDescription' className='mb-2 flex items-center gap-1'>
-                Brief Description of Issue
-                <span className='text-primary'>*</span>
-              </Label>
-              <Textarea
-                id='issueDescription'
-                placeholder='Describe the issue in detail (at least 10 characters)'
-                value={formData.issueDescription}
-                onChange={(e) => setFormData((prev) => ({ ...prev, issueDescription: e.target.value }))}
-                className='mt-1 min-h-24 border-primary/30 focus:border-primary'
-              />
-              <p className={`text-xs mt-1 ${formData.issueDescription.length < 10 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500'}`}>
-                {formData.issueDescription.length} / 10 characters minimum {formData.issueDescription.length >= 10 && '✓'}
-              </p>
-            </div>
-
-            <div>
-              <Label htmlFor='notes' className='mb-2'>
-                Additional Notes (Optional)
-              </Label>
-              <Textarea
-                id='notes'
-                placeholder='Add any additional job-level notes...'
-                value={formData.additionalNotes}
-                onChange={(e) => setFormData((prev) => ({ ...prev, additionalNotes: e.target.value }))}
-                className='mt-1 min-h-16'
-              />
-            </div>
-          </div>
-
-          {/* Technician Assignment */}
-          <div className='space-y-4 pb-6 border-b border-slate-200 dark:border-slate-700'>
-            <div className='flex items-center gap-2 bg-linear-to-r from-slate-100 to-transparent dark:from-slate-800 p-3 rounded-lg border-l-4 border-slate-400 dark:border-slate-600'>
-              <h3 className='font-semibold text-base'>Technician Assignment</h3>
-              <span className='text-xs bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 px-2 py-0.5 rounded'>Optional</span>
-            </div>
-
-            <div className='relative'>
-              <Label htmlFor='technician' className='mb-2'>
-                Assign To Technician (Optional)
-              </Label>
-              <p className='text-xs text-slate-500 mb-2'>You can assign a technician now or later when editing the ticket</p>
-              <div className='relative mt-1'>
-                <div className='relative'>
-                  <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400' />
-                  <Input
-                    id='technician'
-                    type='text'
-                    placeholder='Search technician by name...'
-                    value={technicianSearch || formData.assignedToName}
-                    onChange={(e) => {
-                      setTechnicianSearch(e.target.value);
-                      setShowTechnicianDropdown(true);
-                    }}
-                    onFocus={() => setShowTechnicianDropdown(true)}
-                    className='pl-9'
-                  />
-                </div>
-
-                {showTechnicianDropdown && (filteredTechnicians.length > 0 || technicianSearch) && (
-                  <Card className='absolute top-full left-0 right-0 mt-1 z-50 border shadow-lg'>
-                    <CardContent className='p-0 max-h-48 overflow-y-auto'>
-                      {filteredTechnicians.length > 0 ? (
-                        filteredTechnicians.map((tech) => (
-                          <button
-                            key={tech.id}
-                            type='button'
-                            onClick={() => handleTechnicianSelect(tech.id, tech.name)}
-                            className='w-full text-left px-4 py-2 hover:bg-slate-100 dark:hover:bg-slate-800 border-b last:border-b-0'
-                          >
-                            {tech.name}
+                  {formData.machines.length > 0 && (
+                    <div className='space-y-2'>
+                      <p className='text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
+                        {formData.machines.length} Machine{formData.machines.length !== 1 ? 's' : ''} Added
+                      </p>
+                      {formData.machines.map((machine, index) => (
+                        <div key={index} className='flex items-start justify-between bg-card border border-border rounded-lg p-3.5 gap-3 hover:border-primary/30 transition-colors'>
+                          <div className='flex-1 min-w-0'>
+                            <div className='flex items-center gap-2 flex-wrap mb-2'>
+                              <span className='text-sm font-medium text-foreground'>{machine.serialNumber}</span>
+                              <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${PRIORITY_BADGE[machine.priority] ?? 'bg-muted text-muted-foreground'}`}>{machine.priority}</span>
+                            </div>
+                            <div className='flex gap-3 flex-wrap'>
+                              <div className='space-y-0.5'>
+                                <label className='text-[11px] text-muted-foreground uppercase tracking-wide font-medium'>Type</label>
+                                <Select value={machine.machineType} onValueChange={(value) => handleMachineTypeChange(machine.machineId, value)}>
+                                  <SelectTrigger className='h-7 w-36 text-xs border-border'>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {MACHINE_TYPES.map((type) => (
+                                      <SelectItem key={type} value={type}>
+                                        {type}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div className='space-y-0.5'>
+                                <label className='text-[11px] text-muted-foreground uppercase tracking-wide font-medium'>Priority</label>
+                                <Select value={machine.priority} onValueChange={(value) => handleMachinePriorityChange(machine.machineId, value)}>
+                                  <SelectTrigger className='h-7 w-28 text-xs border-border'>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {PRIORITY_LEVELS.map((level) => (
+                                      <SelectItem key={level} value={level}>
+                                        {level}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                          </div>
+                          <button type='button' onClick={() => handleRemoveMachine(index)} className='text-muted-foreground hover:text-destructive transition-colors shrink-0 mt-0.5 cursor-pointer'>
+                            <Trash2 className='h-4 w-4' />
                           </button>
-                        ))
-                      ) : (
-                        <div className='px-4 py-2 text-sm text-slate-500'>No technicians found</div>
-                      )}
-                    </CardContent>
-                  </Card>
-                )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </section>
+
+            {/* ── 3. Issue Details ── */}
+            <section className='space-y-4'>
+              <div className='flex items-center justify-between'>
+                <div className='flex items-center gap-2'>
+                  <FileText className='h-4 w-4 text-primary' />
+                  <h3 className='text-sm font-semibold text-foreground'>Issue Details</h3>
+                </div>
+                <span className='text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-primary/10 text-primary'>Required</span>
+              </div>
+              <div className='h-px bg-border' />
+
+              <div className='space-y-1.5'>
+                <Label htmlFor='briefDescription' className='text-sm font-medium flex items-center gap-2'>
+                  Brief Summary
+                  <span className='text-xs text-muted-foreground font-normal'>shown in ticket list · max 120 chars</span>
+                </Label>
+                <Input
+                  id='briefDescription'
+                  placeholder='e.g. Crescendo not holding brew temperature'
+                  value={formData.briefDescription}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, briefDescription: e.target.value }))}
+                  maxLength={120}
+                />
+                <p className='text-xs text-muted-foreground text-right'>{formData.briefDescription.length} / 120</p>
               </div>
 
-              {formData.assignedToName && (
-                <div className='mt-2 flex items-center justify-between bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 rounded-lg p-3 shadow-sm'>
-                  <div className='flex items-center gap-2'>
-                    <div className='h-2 w-2 bg-blue-500 rounded-full animate-pulse'></div>
-                    <span className='text-sm font-semibold text-blue-700 dark:text-blue-300'>{formData.assignedToName}</span>
-                  </div>
-                  <button
-                    type='button'
-                    onClick={() => {
-                      setFormData((prev) => ({ ...prev, assignedTo: '', assignedToName: '' }));
-                      setTechnicianSearch('');
-                    }}
-                    className='text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                  >
-                    <X className='h-4 w-4' />
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Scheduled Visit Date */}
-          <div className='space-y-4 pb-6 border-b border-slate-200 dark:border-slate-700'>
-            <div className='flex items-center gap-2 bg-linear-to-r from-amber-100 to-transparent dark:from-amber-900/30 p-3 rounded-lg border-l-4 border-amber-400'>
-              <h3 className='font-semibold text-base text-amber-800 dark:text-amber-200'>Scheduled Site Visit</h3>
-              <span className='text-xs bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-100 px-2 py-0.5 rounded'>Optional</span>
-            </div>
-
-            <div className='space-y-3'>
-              <div>
-                <Label htmlFor='scheduledVisitDate' className='mb-2'>
-                  Visit Date
+              <div className='space-y-1.5'>
+                <Label htmlFor='issueDescription' className='text-sm font-medium'>
+                  Full Description <span className='text-primary'>*</span>
+                  <span className='text-xs text-muted-foreground font-normal ml-2'>customer-facing · appears on client reports</span>
                 </Label>
-                <div className='flex gap-2'>
-                  <Input
-                    id='scheduledVisitDate'
-                    type='date'
-                    value={formData.scheduledVisitDate}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, scheduledVisitDate: e.target.value }))}
-                    className='mt-1 flex-1 text-base'
-                    min={new Date().toISOString().split('T')[0]}
-                  />
+                <Textarea
+                  id='issueDescription'
+                  placeholder='Describe the issue in detail…'
+                  value={formData.issueDescription}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, issueDescription: e.target.value }))}
+                  className='min-h-24 resize-none'
+                />
+                <p className={`text-xs ${formData.issueDescription.length > 0 && formData.issueDescription.length < 10 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>
+                  {formData.issueDescription.length} chars {formData.issueDescription.length >= 10 ? '· minimum reached ✓' : '· 10 character minimum'}
+                </p>
+              </div>
+
+              <div className='space-y-1.5'>
+                <Label htmlFor='internalNotes' className='text-sm font-medium flex items-center gap-2'>
+                  Internal Notes
+                  <span className='text-xs text-muted-foreground font-normal'>admin &amp; technician only · not on client report</span>
+                </Label>
+                <Textarea
+                  id='internalNotes'
+                  placeholder='Internal context, diagnostics, customer history…'
+                  value={formData.internalNotes}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, internalNotes: e.target.value }))}
+                  className='min-h-[80px] resize-none'
+                />
+              </div>
+            </section>
+
+            {/* ── 4. Assignment & Schedule ── */}
+            <section className='space-y-4'>
+              <div className='flex items-center justify-between'>
+                <div className='flex items-center gap-2'>
+                  <UserCheck className='h-4 w-4 text-muted-foreground' />
+                  <h3 className='text-sm font-semibold text-foreground'>Assignment &amp; Schedule</h3>
+                </div>
+                <span className='text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-muted text-muted-foreground'>Optional</span>
+              </div>
+              <div className='h-px bg-border' />
+
+              <div className='grid grid-cols-1 sm:grid-cols-2 gap-6'>
+                {/* Technician */}
+                <div className='space-y-2'>
+                  <Label className='text-sm font-medium'>Assign Technician</Label>
+                  <p className='text-xs text-muted-foreground'>Can be assigned later when editing the ticket.</p>
+                  <div className='relative'>
+                    <Search className='absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none' />
+                    <Input
+                      id='technician'
+                      type='text'
+                      placeholder='Search by name…'
+                      value={technicianSearch || formData.assignedToName}
+                      onChange={(e) => {
+                        setTechnicianSearch(e.target.value);
+                        setShowTechnicianDropdown(true);
+                      }}
+                      onFocus={() => setShowTechnicianDropdown(true)}
+                      className='pl-9'
+                      autoComplete='off'
+                    />
+                    {showTechnicianDropdown && (filteredTechnicians.length > 0 || technicianSearch) && (
+                      <div className='absolute top-full left-0 right-0 mt-1 z-50 bg-popover border border-border rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto'>
+                        {filteredTechnicians.length > 0 ? (
+                          filteredTechnicians.map((tech) => (
+                            <button
+                              key={tech.id}
+                              type='button'
+                              onClick={() => handleTechnicianSelect(tech.id, tech.name)}
+                              className='w-full text-left px-4 py-2.5 hover:bg-accent text-sm font-medium text-foreground transition-colors border-b border-border last:border-b-0 cursor-pointer'
+                            >
+                              {tech.name}
+                            </button>
+                          ))
+                        ) : (
+                          <div className='px-4 py-3 text-sm text-muted-foreground'>No technicians found</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {formData.assignedToName && (
+                    <div className='flex items-center justify-between bg-primary/8 border border-primary/20 rounded-lg px-3.5 py-2.5'>
+                      <div className='flex items-center gap-2'>
+                        <UserCheck className='h-3.5 w-3.5 text-primary' />
+                        <span className='text-sm font-medium text-primary'>{formData.assignedToName}</span>
+                      </div>
+                      <button
+                        type='button'
+                        onClick={() => {
+                          setFormData((prev) => ({ ...prev, assignedTo: '', assignedToName: '' }));
+                          setTechnicianSearch('');
+                        }}
+                        className='text-muted-foreground hover:text-foreground transition-colors cursor-pointer'
+                      >
+                        <X className='h-3.5 w-3.5' />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Schedule */}
+                <div className='space-y-2'>
+                  <Label className='text-sm font-medium'>Scheduled Site Visit</Label>
+                  <p className='text-xs text-muted-foreground'>Set the date and time for the technician&apos;s visit.</p>
+                  <div className='flex gap-2'>
+                    <Input
+                      id='scheduledVisitDate'
+                      type='date'
+                      value={formData.scheduledVisitDate}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, scheduledVisitDate: e.target.value }))}
+                      className='flex-1'
+                      min={new Date().toISOString().split('T')[0]}
+                    />
+                    {formData.scheduledVisitDate && (
+                      <Button type='button' variant='ghost' size='icon' onClick={() => setFormData((prev) => ({ ...prev, scheduledVisitDate: '', scheduledVisitTime: '' }))}>
+                        <X className='h-4 w-4' />
+                      </Button>
+                    )}
+                  </div>
                   {formData.scheduledVisitDate && (
-                    <Button type='button' variant='ghost' size='sm' onClick={() => setFormData((prev) => ({ ...prev, scheduledVisitDate: '', scheduledVisitTime: '' }))} className='mt-1'>
-                      <X className='h-4 w-4' />
-                    </Button>
+                    <div className='space-y-1.5'>
+                      <Label htmlFor='scheduledVisitTime' className='text-xs text-muted-foreground'>
+                        Visit Time <span className='font-normal'>(defaults to 9:00 AM if not set)</span>
+                      </Label>
+                      <Input id='scheduledVisitTime' type='time' value={formData.scheduledVisitTime} onChange={(e) => setFormData((prev) => ({ ...prev, scheduledVisitTime: e.target.value }))} />
+                    </div>
                   )}
                 </div>
               </div>
+            </section>
 
-              {formData.scheduledVisitDate && (
-                <div>
-                  <Label htmlFor='scheduledVisitTime' className='mb-2'>
-                    Visit Time (defaults to 9:00 AM if not specified)
-                  </Label>
-                  <Input
-                    id='scheduledVisitTime'
-                    type='time'
-                    value={formData.scheduledVisitTime}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, scheduledVisitTime: e.target.value }))}
-                    className='mt-1 text-base'
-                  />
+            {/* ── 5. Media ── */}
+            <section className='space-y-4'>
+              <div className='flex items-center justify-between'>
+                <div className='flex items-center gap-2'>
+                  <ImageOff className='h-4 w-4 text-muted-foreground' />
+                  <h3 className='text-sm font-semibold text-muted-foreground'>Photos &amp; Videos</h3>
                 </div>
-              )}
+                <span className='text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-muted text-muted-foreground'>Coming Soon</span>
+              </div>
+              <div className='h-px bg-border' />
+              <div className='border border-dashed border-border rounded-xl p-6 text-center opacity-50'>
+                <Upload className='h-6 w-6 text-muted-foreground mx-auto mb-2' />
+                <p className='text-sm text-muted-foreground font-medium'>Photo &amp; Video Upload</p>
+                <p className='text-xs text-muted-foreground mt-1'>Available after the application is published</p>
+              </div>
+            </section>
 
-              <p className='text-xs text-slate-500'>Schedule when the technician should visit the site to work on this issue</p>
-            </div>
-          </div>
-
-          {/* Media Attachments - Disabled */}
-          <div className='space-y-4 pb-6'>
-            <div className='flex items-center gap-2 bg-linear-to-r from-slate-100 to-transparent dark:from-slate-800 p-3 rounded-lg border-l-4 border-slate-400 dark:border-slate-600 opacity-60'>
-              <h3 className='font-semibold text-base text-slate-500'>Photos & Videos</h3>
-              <span className='text-xs bg-slate-300 dark:bg-slate-600 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded'>Coming Soon</span>
-            </div>
-
-            <div className='border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-lg p-6 text-center bg-slate-50/50 dark:bg-slate-900/50'>
-              <div className='flex flex-col items-center gap-2 opacity-50'>
-                <Upload className='h-6 w-6 text-slate-400' />
-                <p className='text-sm font-medium text-slate-600 dark:text-slate-400'>Photo & Video Upload</p>
-                <p className='text-xs text-slate-500 mt-2 max-w-md'>This feature will become available when the application is published</p>
+            {/* ── Footer ── */}
+            <div className='flex items-center justify-between pt-4 border-t border-border'>
+              <p className='text-xs text-muted-foreground'>
+                {formData.machines.length > 0
+                  ? `${formData.machines.length} machine${formData.machines.length !== 1 ? 's' : ''} · ${formData.selectedCustomerName}`
+                  : 'Complete all required fields to submit'}
+              </p>
+              <div className='flex gap-2'>
+                <Button type='button' variant='outline' onClick={() => onOpenChange(false)} disabled={submitting}>
+                  Cancel
+                </Button>
+                <Button type='submit' disabled={submitting || loading}>
+                  {submitting ? 'Creating…' : 'Create Ticket'}
+                </Button>
               </div>
             </div>
-          </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
-          {/* Form Actions */}
-          <div className='flex gap-3 justify-end pt-4 border-t border-primary/20'>
-            <Button type='button' variant='outline' onClick={() => onOpenChange(false)} disabled={submitting}>
-              Cancel
-            </Button>
-            <Button type='submit' disabled={submitting || loading} className='bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg hover:shadow-xl transition-all'>
-              {submitting ? 'Creating Ticket...' : 'Create Ticket'}
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
+      <ShareTicketDialog
+        open={shareOpen}
+        onOpenChange={(isOpen) => {
+          setShareOpen(isOpen);
+          if (!isOpen) onSuccess?.();
+        }}
+        ticketData={pendingShareData}
+      />
+    </>
   );
 }

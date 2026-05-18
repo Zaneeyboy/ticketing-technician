@@ -41,7 +41,7 @@ export default function ForgotPasswordPage() {
       <LandingNavbar />
 
       {/* Main Content */}
-      <div className='flex-1 flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4 py-12'>
+      <div className='flex-1 flex items-center justify-center bg-linear-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4 py-12'>
         <div className='w-full max-w-md'>
           <div className='mb-6'>
             <Link href='/login' className='inline-flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors'>

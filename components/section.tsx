@@ -31,10 +31,8 @@ export function SectionHeading({ title, description, centered = true }: SectionH
 
   return (
     <div className={`${maxWidth} mb-12 ${classes} animate-fade-in`}>
-      <h2 className='text-3xl font-bold tracking-tight text-foreground sm:text-4xl bg-gradient-to-r from-foreground via-primary to-foreground bg-clip-text hover:text-transparent transition-all duration-300'>
-        {title}
-      </h2>
-      {description && <p className='mt-4 text-lg text-muted-foreground animate-fade-in stagger-1 group-hover:text-foreground/80 transition-colors duration-300'>{description}</p>}
+      <h2 className='text-3xl font-bold tracking-tight text-foreground sm:text-4xl'>{title}</h2>
+      {description && <p className='mt-4 text-lg text-muted-foreground animate-fade-in stagger-1'>{description}</p>}
     </div>
   );
 }

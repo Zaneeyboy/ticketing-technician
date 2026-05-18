@@ -35,7 +35,7 @@ export function EditTicketModal({ open, onOpenChange, ticket, onSuccess }: EditT
   const [formData, setFormData] = useState({
     issueDescription: ticket.issueDescription || '',
     contactPerson: ticket.contactPerson || '',
-    additionalNotes: ticket.additionalNotes || '',
+    internalNotes: ticket.internalNotes || ticket.additionalNotes || '',
     status: ticket.status,
     assignedTo: ticket.assignedTo || '',
     assignedToName: ticket.assignedToName || '',
@@ -61,7 +61,7 @@ export function EditTicketModal({ open, onOpenChange, ticket, onSuccess }: EditT
       setFormData({
         issueDescription: ticket.issueDescription || '',
         contactPerson: ticket.contactPerson || '',
-        additionalNotes: ticket.additionalNotes || '',
+        internalNotes: ticket.internalNotes || ticket.additionalNotes || '',
         status: ticket.status,
         assignedTo: ticket.assignedTo || '',
         assignedToName: ticket.assignedToName || '',
@@ -112,7 +112,7 @@ export function EditTicketModal({ open, onOpenChange, ticket, onSuccess }: EditT
       const updateData: any = {
         issueDescription: formData.issueDescription,
         contactPerson: formData.contactPerson,
-        additionalNotes: formData.additionalNotes,
+        internalNotes: formData.internalNotes,
         status: formData.status,
       };
 
@@ -215,14 +215,14 @@ export function EditTicketModal({ open, onOpenChange, ticket, onSuccess }: EditT
             />
           </div>
 
-          {/* Additional Notes */}
+          {/* Internal Notes */}
           <div className='space-y-2'>
-            <Label htmlFor='notes'>Additional Notes</Label>
+            <Label htmlFor='notes'>Internal Notes</Label>
             <textarea
               id='notes'
-              value={formData.additionalNotes}
-              onChange={(e) => setFormData((prev) => ({ ...prev, additionalNotes: e.target.value }))}
-              placeholder='Add any additional notes...'
+              value={formData.internalNotes}
+              onChange={(e) => setFormData((prev) => ({ ...prev, internalNotes: e.target.value }))}
+              placeholder='Internal notes (not visible to customer)...'
               className='w-full px-3 py-2 border rounded-md bg-white dark:bg-slate-900 dark:border-slate-700 text-sm'
               rows={3}
             />

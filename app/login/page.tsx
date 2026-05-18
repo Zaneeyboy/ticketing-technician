@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { LandingNavbar } from '@/components/landing-navbar';
 import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -61,16 +61,16 @@ export default function LoginPage() {
       <LandingNavbar />
 
       {/* Header spacer to avoid content overlap with sticky navbar */}
-      <div className='flex-1 flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4 py-12'>
+      <div className='flex-1 flex items-center justify-center bg-muted p-4 py-12'>
         <div className='w-full max-w-md animate-fade-in'>
           <div className='mb-6 animate-slide-in-left'>
-            <Link href='/' className='inline-flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-all duration-300 hover:translate-x-1 mb-4'>
+            <Link href='/' className='inline-flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors mb-4'>
               <ArrowLeft className='h-4 w-4 transition-transform duration-300' />
               Back to Home
             </Link>
           </div>
 
-          <Card className='shadow-lg animate-fade-in hover:shadow-primary/20 transition-shadow duration-300'>
+          <Card className='shadow-sm animate-fade-in border-border'>
             <CardHeader className='space-y-1 pb-4'>
               <CardTitle className='text-2xl font-bold animate-fade-in stagger-1'>Welcome Back</CardTitle>
               <CardDescription>Sign in to access the Tech Dynamics ticketing system</CardDescription>
@@ -105,16 +105,19 @@ export default function LoginPage() {
                     onChange={(e) => setPassword(e.target.value)}
                     required
                     disabled={loading}
-                    className='transition-all duration-300 focus:shadow-lg focus:shadow-primary/20'
+                    className='transition-colors'
                   />
                 </div>
-                {error && <div className='text-sm text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20 p-3 rounded border border-rose-200 dark:border-rose-800 animate-shake'>{error}</div>}
-                <Button
-                  type='submit'
-                  className='w-full bg-primary hover:bg-primary/90 text-white font-semibold transition-all duration-300 hover:shadow-lg hover:shadow-primary/40 active:scale-95'
-                  disabled={loading}
-                >
-                  {loading ? 'Signing in...' : 'Sign In'}
+                {error && <div className='text-sm text-destructive bg-destructive/5 p-3 rounded-sm border border-destructive/20 animate-shake'>{error}</div>}
+                <Button type='submit' className='w-full' disabled={loading}>
+                  {loading ? (
+                    <>
+                      <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+                      Signing in...
+                    </>
+                  ) : (
+                    'Sign In'
+                  )}
                 </Button>
 
                 <div className='relative'>
@@ -126,7 +129,7 @@ export default function LoginPage() {
                   </div>
                 </div>
 
-                <Button type='button' variant='outline' className='w-full transition-all duration-300 hover:border-primary hover:bg-primary/5 active:scale-95' asChild>
+                <Button type='button' variant='outline' className='w-full' asChild>
                   <Link href='/signup'>Create Account</Link>
                 </Button>
 

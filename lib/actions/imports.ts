@@ -1,4 +1,4 @@
-'use server';
+﻿'use server';
 
 import { adminDb } from '@/lib/firebase/admin';
 import { getCurrentUser } from '@/lib/auth/session';
@@ -15,7 +15,7 @@ export interface CustomerImportRow {
 
 export interface MachineImportRow {
   serialNumber: string;
-  type: 'Crescendo' | 'Espresso' | 'Grinder' | 'Other';
+  type: string; // Any machine type is accepted
   companyName: string; // Will be matched to existing customer
   location?: string;
   installationDate?: string;
@@ -63,8 +63,8 @@ export function validateMachine(row: any, rowNumber: number): { valid: boolean; 
   if (!row.serialNumber || typeof row.serialNumber !== 'string' || row.serialNumber.trim() === '') {
     errors.push('serialNumber is required');
   }
-  if (!row.type || !['Crescendo', 'Espresso', 'Grinder', 'Other'].includes(row.type.trim())) {
-    errors.push('type must be one of: Crescendo, Espresso, Grinder, Other');
+  if (!row.type || typeof row.type !== 'string' || row.type.trim() === '') {
+    errors.push('type is required (e.g. iPilot Machine, Crescendo Machine, BUNN Grinder)');
   }
   if (!row.companyName || typeof row.companyName !== 'string' || row.companyName.trim() === '') {
     errors.push('companyName is required for linking to customer');
@@ -80,7 +80,7 @@ export function validateMachine(row: any, rowNumber: number): { valid: boolean; 
 export async function importCustomers(rows: any[]): Promise<ImportResult> {
   try {
     const user = await getCurrentUser();
-    if (!user || !['admin', 'management'].includes(user.role)) {
+    if (!user || !['store_admin', 'super_admin'].includes(user.role)) {
       return { success: false, imported: 0, skipped: 0, errors: [{ row: 0, reason: 'Unauthorized' }] };
     }
 
@@ -153,7 +153,7 @@ export async function importCustomers(rows: any[]): Promise<ImportResult> {
 export async function importMachines(rows: any[]): Promise<ImportResult> {
   try {
     const user = await getCurrentUser();
-    if (!user || !['admin', 'management'].includes(user.role)) {
+    if (!user || !['store_admin', 'super_admin'].includes(user.role)) {
       return { success: false, imported: 0, skipped: 0, errors: [{ row: 0, reason: 'Unauthorized' }] };
     }
 

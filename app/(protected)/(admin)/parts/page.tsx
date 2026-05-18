@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useDebounce } from '@/lib/hooks/useDebounce';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { useRouter } from 'next/navigation';
 import { showToast } from '@/lib/toast';
@@ -15,27 +16,33 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { ColumnDef, flexRender, getCoreRowModel, getFilteredRowModel, getPaginationRowModel, getSortedRowModel, useReactTable, SortingState } from '@tanstack/react-table';
-import { collection, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase/client';
 import { Part } from '@/lib/types';
-import { createPart, updatePart, deletePart } from '@/lib/actions/parts';
-import { Plus, Edit2, Trash2, Eye, ArrowUpDown } from 'lucide-react';
+import { getParts, createPart, updatePart, deletePart, bulkCreateParts, type BulkPartRow } from '@/lib/actions/parts';
+import { getMachineTypes } from '@/lib/actions/machines';
+import { Plus, Edit2, Trash2, Eye, ArrowUpDown, Upload, Download, Package } from 'lucide-react';
+import { PageHeader } from '@/components/page-header';
 import { TableSkeleton } from '@/components/skeletons/table-skeleton';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import * as XLSX from 'xlsx';
+import { BulkUploadDialog, type ParsedRow } from '@/components/bulk-upload-dialog';
+import { ExportButton } from '@/components/export-button';
 
-export default function PartsPage() {
-  const { user } = useAuth();
-  const router = useRouter();
-  const [parts, setParts] = useState<Part[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [viewDialogOpen, setViewDialogOpen] = useState(false);
-  const [editingPart, setEditingPart] = useState<Part | null>(null);
-  const [viewingPart, setViewingPart] = useState<Part | null>(null);
-  const [deleteDialog, setDeleteDialog] = useState<Part | null>(null);
-  const [sorting, setSorting] = useState<SortingState>([]);
-  const [globalFilter, setGlobalFilter] = useState('');
+// ── PartFormDialog ───────────────────────────────────────────────────────────────
+// Isolated so form keystrokes don't re-render the entire parts table.
+function PartFormDialog({
+  open,
+  onOpenChange,
+  editingPart,
+  machineTypes,
+  onSaved,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  editingPart: Part | null;
+  machineTypes: string[];
+  onSaved: () => void;
+}) {
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -45,6 +52,214 @@ export default function PartsPage() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  // Reset / populate form whenever the dialog opens or the target part changes
+  useEffect(() => {
+    if (open) {
+      setError('');
+      setFormData(
+        editingPart
+          ? {
+              name: editingPart.name,
+              description: editingPart.description,
+              category: editingPart.category || '',
+              quantityInStock: editingPart.quantityInStock,
+              minQuantity: editingPart.minQuantity || 0,
+            }
+          : { name: '', description: '', category: '', quantityInStock: 0, minQuantity: 0 },
+      );
+    }
+  }, [open, editingPart]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError('');
+    try {
+      if (editingPart) {
+        const result = await updatePart(editingPart.id, formData);
+        if (result.success) {
+          showToast.success('Part updated successfully');
+          onSaved();
+          onOpenChange(false);
+        } else {
+          const msg = result.error || 'Failed to update part';
+          setError(msg);
+          showToast.error(msg);
+        }
+      } else {
+        const result = await createPart(formData);
+        if (result.success) {
+          showToast.success('Part created successfully');
+          onSaved();
+          onOpenChange(false);
+        } else {
+          const msg = result.error || 'Failed to create part';
+          setError(msg);
+          showToast.error(msg);
+        }
+      }
+    } catch (err: any) {
+      const msg = err.message;
+      setError(msg);
+      showToast.error(msg);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{editingPart ? 'Edit Part' : 'Add New Part'}</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className='space-y-4'>
+          <div className='space-y-2'>
+            <Label htmlFor='name'>Part Name *</Label>
+            <Input id='name' value={formData.name} onChange={(e) => setFormData((p) => ({ ...p, name: e.target.value }))} required />
+          </div>
+          <div className='space-y-2'>
+            <Label htmlFor='description'>Description *</Label>
+            <Textarea id='description' value={formData.description} onChange={(e) => setFormData((p) => ({ ...p, description: e.target.value }))} required rows={3} />
+          </div>
+          <div className='space-y-2'>
+            <Label htmlFor='category'>Machine Type / Category</Label>
+            <Input
+              id='category'
+              value={formData.category}
+              onChange={(e) => setFormData((p) => ({ ...p, category: e.target.value }))}
+              list='part-category-list'
+              placeholder='Select or type the machine type this part belongs to…'
+            />
+            <datalist id='part-category-list'>
+              {machineTypes.map((t) => (
+                <option key={t} value={t} />
+              ))}
+            </datalist>
+            <p className='text-xs text-muted-foreground'>Link this part to a machine type so it can be filtered when logging work.</p>
+          </div>
+          <div className='grid grid-cols-2 gap-4'>
+            <div className='space-y-2'>
+              <Label htmlFor='quantityInStock'>Quantity in Stock *</Label>
+              <Input
+                id='quantityInStock'
+                type='number'
+                min='0'
+                value={formData.quantityInStock}
+                onChange={(e) => setFormData((p) => ({ ...p, quantityInStock: parseInt(e.target.value) || 0 }))}
+                required
+              />
+            </div>
+            <div className='space-y-2'>
+              <Label htmlFor='minQuantity'>Minimum Quantity</Label>
+              <Input
+                id='minQuantity'
+                type='number'
+                min='0'
+                value={formData.minQuantity}
+                onChange={(e) => setFormData((p) => ({ ...p, minQuantity: parseInt(e.target.value) || 0 }))}
+                placeholder='Low stock alert'
+              />
+            </div>
+          </div>
+          {error && <div className='text-sm text-red-500 bg-red-50 dark:bg-red-900/20 p-3 rounded'>{error}</div>}
+          <div className='flex gap-3'>
+            <Button type='submit' disabled={submitting}>
+              {submitting ? 'Saving...' : editingPart ? 'Update' : 'Create'}
+            </Button>
+            <Button type='button' variant='outline' onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── PartsPage ───────────────────────────────────────────────────────────────
+export default function PartsPage() {
+  const { user, loading: authLoading } = useAuth();
+  const router = useRouter();
+  const [parts, setParts] = useState<Part[]>([]);
+  const [machineTypes, setMachineTypes] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [viewDialogOpen, setViewDialogOpen] = useState(false);
+  const [editingPart, setEditingPart] = useState<Part | null>(null);
+  const [viewingPart, setViewingPart] = useState<Part | null>(null);
+  const [deleteDialog, setDeleteDialog] = useState<Part | null>(null);
+  const [sorting, setSorting] = useState<SortingState>([]);
+  const [globalFilter, setGlobalFilter] = useState('');
+  const debouncedGlobalFilter = useDebounce(globalFilter, 300);
+  const [submitting, setSubmitting] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+
+  // Stats
+  const lowStockCount = parts.filter((p) => p.quantityInStock <= (p.minQuantity || 0)).length;
+  const totalQty = parts.reduce((sum, p) => sum + (p.quantityInStock || 0), 0);
+
+  const downloadTemplate = () => {
+    const ws = XLSX.utils.aoa_to_sheet([
+      ['Part Number', 'Description', 'Qty', 'Unit', 'Category / Machine Type'],
+      ['MACH BREWER 38200.0017', 'BTX-B(D), 2PK HI Alt', 14, 'ea', 'Brewer machine'],
+      ['FILTER PAPER A4', 'Standard A4 filter paper for espresso', 50, 'ea', 'Filter'],
+    ]);
+    ws['!cols'] = [{ wch: 32 }, { wch: 45 }, { wch: 8 }, { wch: 6 }, { wch: 30 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Parts');
+    XLSX.writeFile(wb, 'parts-upload-template.xlsx');
+  };
+
+  const parsePartsFile = (buffer: ArrayBuffer): { rows: ParsedRow[]; parseError?: string } => {
+    try {
+      const wb = XLSX.read(buffer, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const raw = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: '' }) as any[][];
+
+      // Detect header row by looking for 'Part Number' / 'Part No' / 'Part Name' in col[0]
+      let headerRowIdx = raw.findIndex((r) => {
+        const c0 = String(r[0]).toLowerCase();
+        return c0.includes('part number') || c0.includes('part no') || c0.includes('part name');
+      });
+      if (headerRowIdx === -1) headerRowIdx = 0; // fallback to first row
+
+      const headerRow = raw[headerRowIdx] as any[];
+
+      // Auto-detect category column from header labels (col 3 or 4 depending on file format)
+      let categoryColIdx = 4; // default: col E (after Name, Desc, Qty, Unit)
+      headerRow.forEach((cell: any, i: number) => {
+        const h = String(cell).toLowerCase();
+        if (h.includes('categ') || h.includes('machine') || h.includes('type')) {
+          categoryColIdx = i;
+        }
+      });
+
+      // If the row right after the header is blank, skip it (blank spacer); otherwise start immediately
+      const nextRowIdx = headerRowIdx + 1;
+      const nextRow = raw[nextRowIdx] ?? [];
+      const nextRowHasContent = nextRow.some((c: any) => String(c).trim() !== '');
+      const dataStartIdx = nextRowHasContent ? nextRowIdx : nextRowIdx + 1;
+
+      const dataRows = raw.slice(dataStartIdx);
+
+      const rows: ParsedRow[] = dataRows
+        .filter((r) => String(r[0]).trim())
+        .map((r) => ({
+          name: String(r[0]).trim(),
+          description: String(r[1]).trim() || String(r[0]).trim(),
+          quantityInStock: Number(r[2]) || 0,
+          category: String(r[categoryColIdx] ?? '').trim() || undefined,
+          minQuantity: 5,
+        }));
+
+      if (rows.length === 0) return { rows: [], parseError: 'No valid rows found. Ensure the file has a "Part Number" column.' };
+      return { rows };
+    } catch {
+      return { rows: [], parseError: 'Failed to parse file. Use the provided template.' };
+    }
+  };
 
   const getCategoryBadgeColor = (category: string) => {
     const categoryColors: Record<string, string> = {
@@ -60,25 +275,24 @@ export default function PartsPage() {
     return categoryColors[category] || 'bg-slate-100 text-slate-800 dark:bg-slate-900 dark:text-slate-200';
   };
 
+  const canWrite = ['super_admin', 'store_admin', 'store_manager'].includes(user?.role ?? '');
+
   useEffect(() => {
-    if (!user || !['admin', 'management'].includes(user.role)) {
+    if (authLoading) return;
+    if (!user || !['super_admin', 'store_admin', 'store_manager', 'call_admin'].includes(user.role)) {
       router.push('/dashboard');
       return;
     }
+    if (!user.storeId) return;
     loadParts();
-  }, [user]);
+  }, [user, authLoading]);
 
   const loadParts = async () => {
+    if (!user?.storeId) return;
     try {
-      const snapshot = await getDocs(collection(db, 'parts'));
-      const data = snapshot.docs.map(
-        (doc) =>
-          ({
-            id: doc.id,
-            ...doc.data(),
-          }) as Part,
-      );
-      setParts(data);
+      const [data, types] = await Promise.all([getParts(), getMachineTypes()]);
+      setParts(data as unknown as Part[]);
+      setMachineTypes(types);
     } catch (error) {
       console.error('Error loading parts:', error);
     } finally {
@@ -86,54 +300,8 @@ export default function PartsPage() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmitting(true);
-    setError('');
-
-    try {
-      let result;
-      if (editingPart) {
-        result = await updatePart(editingPart.id, formData);
-        if (result.success) {
-          showToast.success('Part updated successfully');
-          setParts(parts.map((p) => (p.id === editingPart.id ? { ...p, ...formData } : p)));
-          setDialogOpen(false);
-        } else {
-          const errorMsg = result.error || 'Failed to update part';
-          setError(errorMsg);
-          showToast.error(errorMsg);
-        }
-      } else {
-        result = await createPart(formData);
-        if (result.success) {
-          showToast.success('Part created successfully');
-          await loadParts();
-          setDialogOpen(false);
-        } else {
-          const errorMsg = result.error || 'Failed to create part';
-          setError(errorMsg);
-          showToast.error(errorMsg);
-        }
-      }
-    } catch (err: any) {
-      const errorMsg = err.message;
-      setError(errorMsg);
-      showToast.error(errorMsg);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const handleEdit = (part: Part) => {
     setEditingPart(part);
-    setFormData({
-      name: part.name,
-      description: part.description,
-      category: part.category || '',
-      quantityInStock: part.quantityInStock,
-      minQuantity: part.minQuantity || 0,
-    });
     setDialogOpen(true);
   };
 
@@ -160,7 +328,6 @@ export default function PartsPage() {
 
   const openNewDialog = () => {
     setEditingPart(null);
-    setFormData({ name: '', description: '', category: '', quantityInStock: 0, minQuantity: 0 });
     setDialogOpen(true);
   };
 
@@ -230,22 +397,26 @@ export default function PartsPage() {
             </TooltipTrigger>
             <TooltipContent>View part</TooltipContent>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant='ghost' size='sm' onClick={() => handleEdit(row.original)} className='h-8 w-8 p-0'>
-                <Edit2 className='h-4 w-4' />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Edit part</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant='ghost' size='sm' onClick={() => setDeleteDialog(row.original)} className='h-8 w-8 p-0 text-destructive hover:text-destructive'>
-                <Trash2 className='h-4 w-4' />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Delete part</TooltipContent>
-          </Tooltip>
+          {canWrite && (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant='ghost' size='sm' onClick={() => handleEdit(row.original)} className='h-8 w-8 p-0'>
+                    <Edit2 className='h-4 w-4' />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Edit part</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant='ghost' size='sm' onClick={() => setDeleteDialog(row.original)} className='h-8 w-8 p-0 text-destructive hover:text-destructive'>
+                    <Trash2 className='h-4 w-4' />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Delete part</TooltipContent>
+              </Tooltip>
+            </>
+          )}
         </div>
       ),
     },
@@ -262,92 +433,113 @@ export default function PartsPage() {
     onGlobalFilterChange: setGlobalFilter,
     state: {
       sorting,
-      globalFilter,
+      globalFilter: debouncedGlobalFilter,
     },
   });
-  if (!user || !['admin', 'management'].includes(user.role)) return null;
+  if (!user || !['super_admin', 'store_admin', 'store_manager', 'call_admin'].includes(user.role)) return null;
 
   return (
     <DashboardLayout>
       <div className='space-y-6'>
-        <div className='flex justify-between items-center'>
-          <div>
-            <p className='text-slate-600 dark:text-slate-400'>Manage parts inventory</p>
-          </div>
+        {/* Page Header */}
+        <PageHeader
+          title='Parts'
+          description='Manage your parts inventory and stock levels'
+          icon={Package}
+          actions={
+            <>
+              <ExportButton
+                data={table.getFilteredRowModel().rows.map((r) => r.original) as unknown as Record<string, any>[]}
+                columns={[
+                  { header: 'Part Name', key: 'name' },
+                  { header: 'Description', key: 'description' },
+                  { header: 'Category', key: 'category', formatter: (v) => v ?? '' },
+                  { header: 'Qty in Stock', key: 'quantityInStock', formatter: (v) => String(v ?? 0) },
+                  { header: 'Min Qty', key: 'minQuantity', formatter: (v) => String(v ?? 0) },
+                  {
+                    header: 'Status',
+                    key: 'quantityInStock',
+                    formatter: (v, row) => (v <= (row?.minQuantity ?? 0) ? 'Low Stock' : 'OK'),
+                  },
+                ]}
+                filename='parts-export'
+                sheetName='Parts'
+                title='Parts Inventory'
+              />
+              {canWrite && (
+                <>
+                  <Button variant='outline' size='sm' onClick={downloadTemplate} className='gap-2'>
+                    <Download className='h-4 w-4' />
+                    Template
+                  </Button>
+                  <Button variant='outline' size='sm' onClick={() => setImportOpen(true)} className='gap-2'>
+                    <Upload className='h-4 w-4' />
+                    Import
+                  </Button>
+                  <Button size='sm' onClick={openNewDialog} className='gap-2'>
+                    <Plus className='h-4 w-4' />
+                    Add Part
+                  </Button>
+                </>
+              )}
+            </>
+          }
+        />
+
+        {/* Stats bar */}
+        <div className='grid grid-cols-1 sm:grid-cols-3 gap-4 stagger-children'>
+          <Card className='animate-card-enter border-t-4 border-t-primary/60 bg-linear-to-br from-primary/8 via-background to-background'>
+            <CardContent className='pt-5 flex items-center gap-3'>
+              <div className='rounded-lg bg-primary/10 p-2.5'>
+                <Package className='h-4 w-4 text-primary' />
+              </div>
+              <div>
+                <p className='text-2xl font-bold'>{parts.length}</p>
+                <p className='text-xs text-muted-foreground'>Total Parts</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className='animate-card-enter border-t-4 border-t-blue-500/60 bg-linear-to-br from-blue-500/8 via-background to-background'>
+            <CardContent className='pt-5 flex items-center gap-3'>
+              <div className='rounded-lg bg-blue-500/10 p-2.5'>
+                <Package className='h-4 w-4 text-blue-600' />
+              </div>
+              <div>
+                <p className='text-2xl font-bold text-blue-700 dark:text-blue-400'>{totalQty.toLocaleString()}</p>
+                <p className='text-xs text-muted-foreground'>Total Units in Stock</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className='animate-card-enter border-t-4 border-t-red-500/60 bg-linear-to-br from-red-500/8 via-background to-background'>
+            <CardContent className='pt-5 flex items-center gap-3'>
+              <div className='rounded-lg bg-red-500/10 p-2.5'>
+                <Package className='h-4 w-4 text-red-600' />
+              </div>
+              <div>
+                <p className='text-2xl font-bold text-red-700 dark:text-red-400'>{lowStockCount}</p>
+                <p className='text-xs text-muted-foreground'>Low Stock Items</p>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
-        <div className='space-y-4'>
-          <div className='flex justify-between items-center gap-4'>
+        <div className='space-y-4 animate-fade-in stagger-4'>
+          <div className='flex flex-wrap justify-between items-center gap-3'>
             <Input placeholder='Search parts...' value={globalFilter} onChange={(e) => setGlobalFilter(e.target.value)} className='max-w-sm' />
-            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-              <DialogTrigger asChild>
-                <Button onClick={openNewDialog} className='gap-2'>
-                  <Plus className='h-4 w-4' />
-                  Add Part
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>{editingPart ? 'Edit Part' : 'Add New Part'}</DialogTitle>
-                </DialogHeader>
-                <form onSubmit={handleSubmit} className='space-y-4'>
-                  <div className='space-y-2'>
-                    <Label htmlFor='name'>Part Name *</Label>
-                    <Input id='name' value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} required />
-                  </div>
-                  <div className='space-y-2'>
-                    <Label htmlFor='description'>Description *</Label>
-                    <Textarea id='description' value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} required rows={3} />
-                  </div>
-                  <div className='space-y-2'>
-                    <Label htmlFor='category'>Category</Label>
-                    <Input id='category' value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value })} placeholder='e.g. Electrical, Mechanical, Filter' />
-                  </div>
-                  <div className='grid grid-cols-2 gap-4'>
-                    <div className='space-y-2'>
-                      <Label htmlFor='quantityInStock'>Quantity in Stock *</Label>
-                      <Input
-                        id='quantityInStock'
-                        type='number'
-                        min='0'
-                        value={formData.quantityInStock}
-                        onChange={(e) => setFormData({ ...formData, quantityInStock: parseInt(e.target.value) || 0 })}
-                        required
-                      />
-                    </div>
-                    <div className='space-y-2'>
-                      <Label htmlFor='minQuantity'>Minimum Quantity</Label>
-                      <Input
-                        id='minQuantity'
-                        type='number'
-                        min='0'
-                        value={formData.minQuantity}
-                        onChange={(e) => setFormData({ ...formData, minQuantity: parseInt(e.target.value) || 0 })}
-                        placeholder='Low stock alert'
-                      />
-                    </div>
-                  </div>
-                  {error && <div className='text-sm text-red-500 bg-red-50 dark:bg-red-900/20 p-3 rounded'>{error}</div>}
-                  <div className='flex gap-3'>
-                    <Button type='submit' disabled={submitting}>
-                      {submitting ? 'Saving...' : editingPart ? 'Update' : 'Create'}
-                    </Button>
-                    <Button type='button' variant='outline' onClick={() => setDialogOpen(false)}>
-                      Cancel
-                    </Button>
-                  </div>
-                </form>
-              </DialogContent>
-            </Dialog>
           </div>
 
+          <PartFormDialog open={dialogOpen} onOpenChange={setDialogOpen} editingPart={editingPart} machineTypes={machineTypes} onSaved={loadParts} />
+
           <Card>
-            <CardHeader>
+            <CardHeader className='flex flex-row items-center justify-between pb-3'>
               <CardTitle>All Parts</CardTitle>
+              <span className='text-sm text-muted-foreground'>
+                {table.getFilteredRowModel().rows.length} result{table.getFilteredRowModel().rows.length !== 1 ? 's' : ''}
+              </span>
             </CardHeader>
             <CardContent>
               {loading ? (
-                <div className='text-center py-8'>Loading...</div>
+                <TableSkeleton rows={8} columns={5} showHeader />
               ) : (
                 <>
                   <div className='border rounded-lg overflow-hidden'>
@@ -372,8 +564,12 @@ export default function PartsPage() {
                           ))
                         ) : (
                           <TableRow>
-                            <TableCell colSpan={columns.length} className='h-24 text-center'>
-                              No parts found
+                            <TableCell colSpan={columns.length} className='h-36 text-center'>
+                              <div className='flex flex-col items-center gap-2 text-muted-foreground'>
+                                <Package className='h-8 w-8 opacity-30' />
+                                <p className='font-medium'>No parts yet</p>
+                                <p className='text-sm'>Add your first part or import from Excel</p>
+                              </div>
                             </TableCell>
                           </TableRow>
                         )}
@@ -457,6 +653,36 @@ export default function PartsPage() {
           </div>
         </AlertDialogContent>
       </AlertDialog>
+
+      <BulkUploadDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        entityName='Parts'
+        previewColumns={[
+          { key: 'name', label: 'Part Number', required: true },
+          { key: 'description', label: 'Description' },
+          { key: 'quantityInStock', label: 'Qty', inputType: 'number' },
+          { key: 'category', label: 'Category / Machine Type' },
+        ]}
+        onDownloadTemplate={downloadTemplate}
+        parseFile={parsePartsFile}
+        validateRow={(row) => {
+          const errors: Record<string, string> = {};
+          const name = String(row.name ?? '').trim();
+          if (!name || name.length < 2) errors.name = 'Part name must be at least 2 characters';
+          const qty = Number(row.quantityInStock);
+          if (isNaN(qty) || qty < 0 || !Number.isFinite(qty)) errors.quantityInStock = 'Must be a whole number ≥ 0';
+          return errors;
+        }}
+        processChunk={async (rows, updateExisting) => {
+          const result = await bulkCreateParts(rows as unknown as BulkPartRow[], updateExisting);
+          const allErrors = result.success ? result.errors : [...result.errors, result.error ?? 'Import failed — check the server logs for details'];
+          return { created: result.created, updated: result.updated, skipped: result.skipped, errors: allErrors };
+        }}
+        showUpdateToggle
+        chunkSize={1000}
+        onComplete={() => loadParts()}
+      />
     </DashboardLayout>
   );
 }

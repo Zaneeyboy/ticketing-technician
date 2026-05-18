@@ -5,6 +5,7 @@ import { unstable_cache } from 'next/cache';
  */
 export const CACHE_TAGS = {
   MACHINES: 'machines',
+  MACHINE_TYPES: 'machine-types',
   PARTS: 'parts',
   CUSTOMERS: 'customers',
   TECHNICIANS: 'technicians',
@@ -12,6 +13,11 @@ export const CACHE_TAGS = {
   CALL_ADMINS: 'call-admins',
   WORK_LOGS: 'work-logs',
   REPORTS: 'reports',
+  STORES: 'stores',
+  HQ_STATS: 'hq-stats',
+  HQ_REPORTS: 'hq-reports',
+  USERS: 'users',
+  INVITATIONS: 'invitations',
 } as const;
 
 /**
@@ -28,9 +34,12 @@ export function createCachedQuery<T>(fn: () => Promise<T>, tags: string[], keyPa
 }
 
 /**
- * Revalidate cache for specific data type
+ * Revalidate cache for specific data types
  */
 export async function revalidateCache(tags: string[]) {
   const { revalidateTag } = await import('next/cache');
-  tags.forEach((tag) => revalidateTag(tag, 'default'));
+  // Next.js 16 types require a profile arg for the new `use cache` API; cast to the
+  // single-arg form which still works at runtime for `unstable_cache`-based tags.
+  const purge = revalidateTag as unknown as (tag: string) => void;
+  tags.forEach(purge);
 }

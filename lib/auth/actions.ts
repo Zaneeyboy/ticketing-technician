@@ -37,8 +37,16 @@ export async function createSessionAction(idToken: string) {
   }
 }
 
-export async function signupAction(data: { email: string; password: string; name: string; role: 'admin' | 'call_admin' | 'technician' | 'management' }) {
+export async function signupAction(data: { email: string; password: string; name: string }) {
   try {
+    // Bootstrap guard: only allow signup when no users exist yet (first-time setup).
+    // After the initial super_admin is created, all subsequent accounts must be
+    // provisioned via the invitation system.
+    const existingUsers = await adminDb.collection('users').limit(1).get();
+    if (!existingUsers.empty) {
+      return { success: false, error: 'Account registration is closed. Contact your administrator for an invitation.' };
+    }
+
     // Create Firebase Auth user
     const userRecord = await adminAuth.createUser({
       email: data.email,
@@ -46,12 +54,13 @@ export async function signupAction(data: { email: string; password: string; name
       displayName: data.name,
     });
 
-    // Create Firestore user document
+    // Create Firestore user document as super_admin with no store assignment
     await adminDb.collection('users').doc(userRecord.uid).set({
       uid: userRecord.uid,
       email: data.email,
       name: data.name,
-      role: data.role,
+      role: 'super_admin',
+      storeId: null,
       disabled: false,
       createdAt: Timestamp.now(),
       updatedAt: Timestamp.now(),

@@ -1,57 +1,138 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // --- Auth helpers ----------------------------------------------------------
     function signedIn() {
       return request.auth != null;
     }
 
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
     function role() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+      return userDoc().role;
     }
 
-    function isAdmin() {
-      return signedIn() && role() == 'admin';
+    function userStoreId() {
+      return userDoc().storeId;
     }
 
-    function isCallAdmin() {
-      return signedIn() && role() == 'call_admin';
+    // --- Role predicates -------------------------------------------------------
+    function isSuperAdmin() {
+      return signedIn() && role() == 'super_admin';
     }
 
-    function isManagement() {
-      return signedIn() && role() == 'management';
+    function isManager() {
+      return signedIn() && role() == 'manager';
+    }
+
+    function isHQ() {
+      return isSuperAdmin() || isManager();
+    }
+
+    function isStoreAdmin() {
+      return signedIn() && role() == 'store_admin';
+    }
+
+    function isStoreManager() {
+      return signedIn() && role() == 'store_manager';
     }
 
     function isTechnician() {
       return signedIn() && role() == 'technician';
     }
 
+    function isCallAdmin() {
+      return signedIn() && role() == 'call_admin';
+    }
+
+    // --- Store membership helpers ----------------------------------------------
+    function belongsToStore(storeId) {
+      return signedIn() && userStoreId() == storeId;
+    }
+
+    // Any signed-in user whose storeId matches, or any HQ user
+    function canAccessStore(storeId) {
+      return isHQ() || belongsToStore(storeId);
+    }
+
+    // Only store_admin (for their own store) or HQ can write store-level data
+    function canWriteStore(storeId) {
+      return isHQ() || (isStoreAdmin() && belongsToStore(storeId));
+    }
+
+    // Ticket write: store_admin, store_manager, and call_admin for their own store
+    function canWriteTicket(storeId) {
+      return isHQ() || ((isStoreAdmin() || isStoreManager() || isCallAdmin()) && belongsToStore(storeId));
+    }
+
+    // --- Store Registry --------------------------------------------------------
+    match /stores/{storeId} {
+      allow read: if canAccessStore(storeId);
+      allow create, update, delete: if isHQ();
+
+      // --- Tickets ----------------------------------------------------------
+      match /tickets/{ticketId} {
+        allow read: if canAccessStore(storeId);
+        allow create: if canWriteTicket(storeId);
+        allow update: if canWriteTicket(storeId) || (isTechnician() && belongsToStore(storeId));
+        allow delete: if canWriteStore(storeId);
+      }
+
+      // --- Customers --------------------------------------------------------
+      match /customers/{customerId} {
+        allow read: if canAccessStore(storeId);
+        allow create, update: if canWriteTicket(storeId);
+        allow delete: if canWriteStore(storeId);
+      }
+
+      // --- Machines ---------------------------------------------------------
+      match /machines/{machineId} {
+        allow read: if canAccessStore(storeId);
+        allow create, update: if canWriteTicket(storeId);
+        allow delete: if canWriteStore(storeId);
+      }
+
+      // --- Config (dynamic machine types, etc.) --------------------------------
+      match /config/{configId} {
+        allow read: if canAccessStore(storeId);
+        allow write: if canWriteStore(storeId);
+      }
+
+      // --- Parts ------------------------------------------------------------
+      match /parts/{partId} {
+        allow read: if canAccessStore(storeId);
+        allow create, update: if isHQ() || ((isStoreAdmin() || isTechnician()) && belongsToStore(storeId));
+        allow delete: if canWriteStore(storeId);
+      }
+
+      // --- Machine Work Logs ------------------------------------------------
+      match /machineWorkLogs/{logId} {
+        allow read: if canAccessStore(storeId);
+        allow create, update: if isHQ() || ((isTechnician() || isStoreAdmin()) && belongsToStore(storeId));
+        allow delete: if canWriteStore(storeId);
+      }
+    }
+
+    // --- Users (top-level, keyed by Firebase Auth UID) ------------------------
     match /users/{userId} {
       allow read: if signedIn();
       allow create: if signedIn();
-      allow update, delete: if isAdmin() || isCallAdmin();
+      allow update: if signedIn() &&
+        (request.auth.uid == userId || isHQ() || isStoreAdmin());
+      allow delete: if isHQ();
     }
 
-    match /customers/{id} {
-      allow read, write: if isAdmin() || isCallAdmin() || isManagement();
-    }
-
-    match /machines/{id} {
-      allow read, write: if isAdmin() || isManagement();
-    }
-
-    match /parts/{id} {
-      allow read, write: if isAdmin() || isManagement();
-    }
-
-    match /tickets/{id} {
-      allow read: if isAdmin() || isCallAdmin() || isManagement() || isTechnician();
-      allow create, update, delete: if isAdmin() || isCallAdmin() || isManagement();
-    }
-
-    match /machineWorkLogs/{id} {
-      allow read: if signedIn();
-      allow create, update: if isTechnician() || isAdmin() || isManagement();
-      allow delete: if isAdmin();
+    // --- Invitations ----------------------------------------------------------
+    // Invitation docs are created/managed by Admin SDK server-side.
+    // The join page needs to read a specific token doc without being signed in yet.
+    // Use `get` (single-doc read) so the full collection cannot be enumerated unauthenticated.
+    match /invitations/{token} {
+      allow get: if true;                                     // join-flow: read by known token
+      allow list: if isHQ() || isStoreAdmin();               // admins only can query
+      allow create, update, delete: if isHQ() || isStoreAdmin();
     }
   }
 }

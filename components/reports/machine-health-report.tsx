@@ -13,6 +13,21 @@ import { useReportData } from '@/components/reports/report-data-provider';
 import type { ReportFilters as ReportFiltersState, ReportWorkLog } from '@/lib/types/reporting';
 import { formatDate } from '@/lib/utils';
 import { ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
+import { ExportButton } from '@/components/export-button';
+import { buildReportMetadata, type ExportColumn } from '@/lib/export';
+
+const MACHINE_EXPORT_COLUMNS: ExportColumn[] = [
+  { header: 'Machine Type', key: 'machineType' },
+  { header: 'Serial #', key: 'serialNumber' },
+  { header: 'Customer', key: 'customer' },
+  { header: 'Health Status', key: 'healthStatus' },
+  { header: 'Total Tickets', key: 'totalTickets' },
+  { header: 'Repeat Issues', key: 'repeatIssues' },
+  { header: 'Total Hours', key: 'totalHours' },
+  { header: 'Parts Used', key: 'partsUsed' },
+  { header: 'Last Service Date', key: 'lastServiceDate' },
+  { header: 'Ticket #s', key: 'ticketNumbers' },
+];
 
 const DEFAULT_FILTERS: ReportFiltersState = {
   statuses: [],
@@ -184,14 +199,14 @@ export function MachineHealthReport() {
         const repeatIssueCount = Array.from(aggregate.issueCounts.values()).filter((count) => count >= 2).length;
         const ticketCount = aggregate.ticketCount;
         let status = 'Healthy';
-        let statusColor = 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800';
+        let statusColor = 'bg-secondary/10 dark:bg-secondary/20 text-secondary border-secondary/30 dark:border-secondary/40';
 
         if (ticketCount >= ticketThreshold * 2 || repeatIssueCount >= 2) {
           status = 'Critical';
-          statusColor = 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800';
+          statusColor = 'bg-destructive/10 dark:bg-destructive/20 text-destructive border-destructive/30 dark:border-destructive/40';
         } else if (ticketCount >= ticketThreshold || repeatIssueCount >= 1) {
           status = 'At Risk';
-          statusColor = 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800';
+          statusColor = 'bg-primary/10 dark:bg-primary/20 text-primary border-primary/30 dark:border-primary/40';
         }
 
         return {
@@ -226,6 +241,36 @@ export function MachineHealthReport() {
     };
   }, [data, filters, ticketThreshold, machineMap, customerMap, technicianMap, ticketMap, partsCategoryMap]);
 
+  const exportRows = useMemo(
+    () =>
+      rows.map((row) => ({
+        machineType: row.type,
+        serialNumber: row.serialNumber,
+        customer: row.customerName,
+        healthStatus: row.status,
+        totalTickets: row.ticketCount,
+        repeatIssues: row.repeatIssueCount,
+        totalHours: row.totalHours.toFixed(1),
+        partsUsed: Array.from(row.partsUsed.entries())
+          .map(([name, qty]) => `${name} ×${qty}`)
+          .join(', '),
+        lastServiceDate: row.lastServiceDate ? new Date(row.lastServiceDate).toLocaleDateString('en-TT') : '',
+        ticketNumbers: row.tickets.map((t) => t.ticketNumber).join(', '),
+      })),
+    [rows],
+  );
+
+  const exportMetadata = useMemo(() => {
+    const meta = buildReportMetadata('Machine Health Report', filters, {
+      technicians: data.technicians,
+      customers: data.customers,
+    });
+    return {
+      ...meta,
+      filters: [...(meta.filters ?? []), { label: 'Ticket Threshold', value: `≥${ticketThreshold} tickets` }],
+    };
+  }, [filters, data.technicians, data.customers, ticketThreshold]);
+
   const router = useRouter();
   const [expandedMachines, setExpandedMachines] = useState<Set<string>>(new Set());
   const [expandedSearch, setExpandedSearch] = useState<Map<string, string>>(new Map());
@@ -244,11 +289,20 @@ export function MachineHealthReport() {
 
   return (
     <div className='space-y-6'>
-      <div className='flex items-center gap-2'>
+      <div className='flex items-center justify-between gap-2'>
         <Button variant='outline' size='sm' onClick={() => router.back()} className='gap-2'>
           <ArrowLeft className='h-4 w-4' />
           Back
         </Button>
+        <ExportButton
+          data={exportRows}
+          columns={MACHINE_EXPORT_COLUMNS}
+          filename={`machine-health-${filters.startDate ?? 'all'}-to-${filters.endDate ?? 'all'}`}
+          sheetName='Machine Health'
+          title='Machine Health Report'
+          subtitle={exportMetadata.subtitle}
+          metadata={exportMetadata}
+        />
       </div>
 
       <ReportFilters
@@ -288,7 +342,7 @@ export function MachineHealthReport() {
             <CardTitle className='text-sm text-muted-foreground'>At Risk</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className='text-2xl font-semibold text-amber-600 dark:text-amber-400'>{rows.filter((r) => r.status === 'At Risk').length}</div>
+            <div className='text-2xl font-semibold text-primary dark:text-primary'>{rows.filter((r) => r.status === 'At Risk').length}</div>
           </CardContent>
         </Card>
         <Card>
@@ -296,7 +350,7 @@ export function MachineHealthReport() {
             <CardTitle className='text-sm text-muted-foreground'>Critical</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className='text-2xl font-semibold text-rose-600 dark:text-rose-400'>{rows.filter((r) => r.status === 'Critical').length}</div>
+            <div className='text-2xl font-semibold text-destructive dark:text-destructive'>{rows.filter((r) => r.status === 'Critical').length}</div>
           </CardContent>
         </Card>
         <Card>
@@ -387,7 +441,7 @@ export function MachineHealthReport() {
                               View
                             </Button>
                           </DialogTrigger>
-                          <DialogContent className='max-w-2xl lg:max-w-5xl max-h-[90vh] overflow-y-auto'>
+                          <DialogContent className='max-w-2xl lg:max-w-5xl max-h-[90vh] overflow-y-auto' aria-describedby={undefined}>
                             <DialogHeader>
                               <DialogTitle>
                                 {row.serialNumber} - Service History
@@ -442,7 +496,7 @@ export function MachineHealthReport() {
                       ? [
                           <TableRow
                             key={`detail-${row.machineId}`}
-                            className='bg-gradient-to-b from-primary/5 to-transparent border-l-4 border-primary/30 animate-in fade-in-0 slide-in-from-top-2 duration-300'
+                            className='bg-linear-to-b from-primary/5 to-transparent border-l-4 border-primary/30 animate-in fade-in-0 slide-in-from-top-2 duration-300'
                           >
                             <TableCell colSpan={9} className='p-4'>
                               <div className='space-y-4 animate-in fade-in-0 duration-500'>

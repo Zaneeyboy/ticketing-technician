@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -9,15 +9,126 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { addBulkWorkLogEntries, closeTicket, getWorkLogsForTicket } from '@/lib/actions/tickets';
+import { addBulkWorkLogEntries, closeTicket, generateSignOffToken, getWorkLogsForTicket } from '@/lib/actions/tickets';
 import { getPartsForSelection, type Part } from '@/lib/actions/parts';
 import { Ticket } from '@/lib/types';
-import { Loader2, CheckCircle, AlertCircle, Trash2, Plus, Wrench } from 'lucide-react';
+import { Loader2, CheckCircle, AlertCircle, Trash2, Plus, Wrench, Search, ClipboardCheck } from 'lucide-react';
 import { showToast } from '@/lib/toast';
+
+// ─── Maintenance checklist (sourced from Caribbean Roasters CoffeeFix Excel) ─
+
+const CHECKLIST_ITEMS = [
+  'Check with Management / Staff for any issues or concerns',
+  'Visual inspection for leaks, cracks, dents or scratches',
+  'Dismantle and clean both Mixing Chambers',
+  'Dismantle and clean both Powder Hopper spouts',
+  'Remove Brew Module — check and clean',
+  'Dump product from servers and soak with CAFIZA',
+  'Run Cleaning Cycle with CAFIZA',
+  'Empty and clean Puck Bin and Drip Tray (if needed)',
+  'Pull 1 Espresso shot to test',
+  'Top up product (if needed)',
+  'Wipe down machine — internally and externally',
+  'Ensure countertops and surrounding area are left clean',
+  'Visual re-inspection for leaks, cracks, dents or scratches',
+  'Remove and clean shower head',
+  'Dump product from servers and soak with CAFIZA',
+  'Wash and rinse funnels',
+  'Remove glass tubes and clean with brush provided',
+] as const;
+
+// ─── Searchable parts combobox ────────────────────────────────────────────────
+// Renders only the filtered slice of parts rather than all items at once,
+// which keeps the DOM lean even when there are hundreds of parts in stock.
+
+function PartSearchCombobox({ parts, value, onSelect, disabled }: { parts: Part[]; value: string; onSelect: (part: Part) => void; disabled?: boolean }) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const selected = useMemo(() => parts.find((p) => p.id === value), [parts, value]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery('');
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [open]);
+
+  const filtered = useMemo(() => {
+    const q = query.toLowerCase().trim();
+    if (!q) return parts.slice(0, 60);
+    return parts.filter((p) => p.name.toLowerCase().includes(q) || p.description?.toLowerCase().includes(q) || p.category?.toLowerCase().includes(q)).slice(0, 60);
+  }, [parts, query]);
+
+  return (
+    <div ref={containerRef} className='relative flex-1'>
+      <div className='relative'>
+        <Search className='absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none' />
+        <input
+          ref={inputRef}
+          type='text'
+          disabled={disabled}
+          className='w-full h-9 pl-8 pr-3 rounded-md border border-input bg-slate-50 dark:bg-slate-900 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50'
+          placeholder={selected ? selected.name : 'Search parts…'}
+          value={open ? query : (selected?.name ?? '')}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => {
+            setQuery('');
+            setOpen(true);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              setOpen(false);
+              setQuery('');
+              inputRef.current?.blur();
+            }
+          }}
+        />
+      </div>
+
+      {open && !disabled && (
+        <div className='absolute z-50 w-full mt-1 bg-popover border border-border rounded-md shadow-lg max-h-56 overflow-y-auto'>
+          {filtered.length === 0 ? (
+            <p className='py-3 px-3 text-sm text-muted-foreground'>No matching parts found</p>
+          ) : (
+            filtered.map((p) => (
+              <button
+                key={p.id}
+                type='button'
+                className='w-full text-left px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground flex items-center justify-between gap-2'
+                onMouseDown={(e) => e.preventDefault()} // keep input focused until click
+                onClick={() => {
+                  onSelect(p);
+                  setQuery('');
+                  setOpen(false);
+                }}
+              >
+                <span className='truncate font-medium'>{p.name}</span>
+                <span className='shrink-0 text-xs text-muted-foreground'>Stock: {p.quantityInStock}</span>
+              </button>
+            ))
+          )}
+          {parts.length > 60 && filtered.length === 60 && <p className='py-1.5 px-3 text-xs text-muted-foreground border-t'>Type to narrow results ({parts.length} total parts)</p>}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const partUsedSchema = z.object({
   partId: z.string().optional(),
@@ -82,9 +193,25 @@ const formatDateTimeLocal = (date: Date | null | undefined, includeTime: boolean
 export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: LogWorkModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [closingTicket, setClosingTicket] = useState(false);
+  const [signOffUrl, setSignOffUrl] = useState<string | null>(null);
   const [availableParts, setAvailableParts] = useState<Part[]>([]);
   const [partsLoading, setPartsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState(machines[0]?.machineId || '');
+  const [checkedItems, setCheckedItems] = useState<Set<number>>(new Set());
+
+  const toggleChecklistItem = (idx: number) =>
+    setCheckedItems((prev) => {
+      const next = new Set(prev);
+      next.has(idx) ? next.delete(idx) : next.add(idx);
+      return next;
+    });
+
+  // Stable ref so loadData always sees the current machines without needing
+  // them in the useEffect dependency array (avoids re-fetching on every parent render)
+  const machinesRef = useRef(machines);
+  useEffect(() => {
+    machinesRef.current = machines;
+  });
 
   // Track parts per machine
   const [machinePartsMap, setMachinePartsMap] = useState<
@@ -132,9 +259,14 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
   const arrivalTime = watch('arrivalTime');
   const departureTime = watch('departureTime');
 
-  // Initialize form values when modal opens
+  // Initialize form values when modal opens.
+  // Dep array is intentionally [isOpen, ticket.id] — machines is accessed via
+  // machinesRef so a new array reference on parent re-render does not retrigger
+  // this effect and wipe in-progress user input.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (isOpen) {
+      const currentMachines = machinesRef.current;
       const loadData = async () => {
         // Load available parts first
         setPartsLoading(true);
@@ -173,7 +305,7 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
             });
 
             // Initialize machine work logs with existing data or defaults
-            const machineWorkLogs = machines.map((m) => {
+            const machineWorkLogs = currentMachines.map((m) => {
               const existingLog = workLogsByMachine.get(m.machineId);
               return {
                 machineId: m.machineId,
@@ -216,7 +348,7 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
             // Initialize machine work logs with empty data
             setValue(
               'machineWorkLogs',
-              machines.map((m) => ({
+              currentMachines.map((m) => ({
                 machineId: m.machineId,
                 workPerformed: '',
                 outcome: '',
@@ -234,7 +366,7 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
 
       loadData();
     }
-  }, [isOpen, machines, setValue, ticket.id]);
+  }, [isOpen, ticket.id]);
 
   // Auto-calculate hours worked
   useEffect(() => {
@@ -303,6 +435,7 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
         showToast.success(`Work logs saved for ${result.count} machine(s)`);
         reset();
         setMachinePartsMap({});
+        setCheckedItems(new Set());
         onSuccess?.();
         onClose();
       } else {
@@ -325,6 +458,7 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
         showToast.success('Ticket closed successfully');
         reset();
         setMachinePartsMap({});
+        setCheckedItems(new Set());
         onSuccess?.();
         onClose();
       } else {
@@ -389,26 +523,24 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
       if (result.success) {
         showToast.success('Work logs saved successfully');
 
-        // Now close the ticket
+        // Generate sign-off token (customer must sign before ticket closes)
         setSubmitting(false);
         setClosingTicket(true);
-        const closeResult = await closeTicket(ticket.id);
+        const tokenResult = await generateSignOffToken(ticket.id);
 
-        if (closeResult.success) {
-          showToast.success('Ticket closed successfully');
-          reset();
-          setMachinePartsMap({});
-          onSuccess?.();
-          onClose();
+        if (tokenResult.success && tokenResult.token) {
+          const url = `${window.location.origin}/sign-off/${tokenResult.token}`;
+          setSignOffUrl(url);
+          onSuccess?.(); // refresh parent list
         } else {
-          showToast.error(closeResult.error || 'Work saved but failed to close ticket');
+          showToast.error(tokenResult.error || 'Work saved but failed to generate sign-off link. Please regenerate from the ticket.');
         }
       } else {
         showToast.error(result.error || 'Failed to save work logs');
       }
     } catch (error) {
-      console.error('Error saving and closing:', error);
-      showToast.error('Failed to save and close ticket');
+      console.error('Error saving work logs:', error);
+      showToast.error('Failed to save work logs');
     } finally {
       setSubmitting(false);
       setClosingTicket(false);
@@ -450,7 +582,7 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className='max-w-5xl lg:max-w-6xl xl:max-w-7xl max-h-[90vh] overflow-y-auto'>
+      <DialogContent className='sm:max-w-3xl max-h-[92dvh] overflow-y-auto'>
         <DialogHeader>
           <div className='flex items-center justify-between'>
             <DialogTitle>Log Work - Ticket {ticket.ticketNumber}</DialogTitle>
@@ -471,7 +603,7 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
               </CardTitle>
             </CardHeader>
             <CardContent className='space-y-4'>
-              <div className='grid grid-cols-2 gap-4'>
+              <div className='grid grid-cols-1 sm:grid-cols-2 gap-3'>
                 {/* Arrival Time */}
                 <div className='space-y-2'>
                   <Label htmlFor='arrivalTime'>Arrival Time *</Label>
@@ -544,16 +676,18 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
             </CardHeader>
             <CardContent>
               <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className='w-full grid' style={{ gridTemplateColumns: `repeat(${machines.length}, 1fr)` }}>
-                  {machines.map((machine) => (
-                    <TabsTrigger key={machine.machineId} value={machine.machineId} className='text-xs'>
-                      {machine.machineType}
-                      <Badge variant='outline' className='ml-1 text-[10px] px-1'>
-                        {machine.serialNumber}
-                      </Badge>
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
+                <div className='overflow-x-auto pb-1 -mx-1 px-1'>
+                  <TabsList className='flex min-w-max gap-1'>
+                    {machines.map((machine) => (
+                      <TabsTrigger key={machine.machineId} value={machine.machineId} className='text-xs shrink-0'>
+                        <span className='max-w-[90px] truncate sm:max-w-none'>{machine.machineType}</span>
+                        <Badge variant='outline' className='ml-1 text-[10px] px-1 hidden sm:inline-flex'>
+                          {machine.serialNumber}
+                        </Badge>
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </div>
 
                 {machines.map((machine, machineIdx) => {
                   const machineParts = machinePartsMap[machine.machineId] || [];
@@ -615,32 +749,20 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
                               const isQtyInvalid = part.quantity > maxQty;
 
                               return (
-                                <div key={`${machine.machineId}-part-${partIdx}`} className='flex gap-2 items-end'>
-                                  <div className='flex-1 space-y-1'>
-                                    <Select
-                                      value={part.partId || ''}
-                                      onValueChange={(partId) => {
-                                        const selected = availableParts.find((p) => p.id === partId);
-                                        updatePartForMachine(machine.machineId, partIdx, {
-                                          partId,
-                                          partName: selected?.name || '',
-                                          quantity: 1,
-                                          availableQty: selected?.quantityInStock || 0,
-                                        });
-                                      }}
-                                    >
-                                      <SelectTrigger className='bg-slate-50 dark:bg-slate-900 text-sm'>
-                                        <SelectValue placeholder='Select a part' />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {availableParts.map((p) => (
-                                          <SelectItem key={p.id} value={p.id}>
-                                            {p.name} (Stock: {p.quantityInStock})
-                                          </SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                  </div>
+                                <div key={`${machine.machineId}-part-${partIdx}`} className='flex gap-2 items-center'>
+                                  <PartSearchCombobox
+                                    parts={availableParts}
+                                    value={part.partId || ''}
+                                    disabled={partsLoading}
+                                    onSelect={(selected) => {
+                                      updatePartForMachine(machine.machineId, partIdx, {
+                                        partId: selected.id,
+                                        partName: selected.name,
+                                        quantity: 1,
+                                        availableQty: selected.quantityInStock,
+                                      });
+                                    }}
+                                  />
                                   <div className='w-24 space-y-1'>
                                     <div className='text-xs text-slate-500 dark:text-slate-400'>Qty (Max: {maxQty})</div>
                                     <Input
@@ -713,43 +835,178 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
             </CardContent>
           </Card>
 
+          {/* ── Maintenance Checklist ─────────────────────────────── */}
+          <Card className='border-primary/20'>
+            <CardHeader className='pb-3'>
+              <div className='flex items-start justify-between gap-3'>
+                <div className='flex items-center gap-2'>
+                  <div className='p-1.5 rounded-md bg-primary/10'>
+                    <ClipboardCheck className='h-4 w-4 text-primary' />
+                  </div>
+                  <div>
+                    <CardTitle className='text-sm'>CoffeeFix Maintenance Checklist</CardTitle>
+                    <p className='text-xs text-muted-foreground mt-0.5'>Required to close this ticket — check every task completed</p>
+                  </div>
+                </div>
+                {/* Progress pill */}
+                <div
+                  className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${checkedItems.size === 0 ? 'bg-muted text-muted-foreground' : checkedItems.size === CHECKLIST_ITEMS.length ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' : 'bg-primary/10 text-primary'}`}
+                >
+                  <span>{checkedItems.size}</span>
+                  <span className='opacity-60'>/</span>
+                  <span>{CHECKLIST_ITEMS.length}</span>
+                </div>
+              </div>
+            </CardHeader>
+
+            <CardContent className='space-y-4'>
+              {/* Checklist grid */}
+              <div className='grid grid-cols-1 sm:grid-cols-2 gap-1.5'>
+                {CHECKLIST_ITEMS.map((item, idx) => {
+                  const checked = checkedItems.has(idx);
+                  return (
+                    <button
+                      key={idx}
+                      type='button'
+                      onClick={() => toggleChecklistItem(idx)}
+                      className={`group flex items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors ${checked ? 'border-primary/30 bg-primary/5 dark:bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted/60'}`}
+                    >
+                      {/* Custom checkbox */}
+                      <span
+                        className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors ${checked ? 'border-primary bg-primary' : 'border-muted-foreground/40 bg-background group-hover:border-primary/60'}`}
+                      >
+                        {checked && (
+                          <svg className='h-2.5 w-2.5 text-primary-foreground' viewBox='0 0 12 10' fill='none'>
+                            <path d='M1 5l3.5 3.5L11 1' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' />
+                          </svg>
+                        )}
+                      </span>
+                      {/* Number badge + label */}
+                      <span className='flex items-start gap-2 min-w-0'>
+                        <span className={`mt-px shrink-0 text-[10px] font-bold tabular-nums ${checked ? 'text-primary' : 'text-muted-foreground'}`}>{String(idx + 1).padStart(2, '0')}</span>
+                        <span className={`text-xs leading-relaxed ${checked ? 'text-foreground' : 'text-muted-foreground'}`}>{item}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Sign-off statement */}
+              <div className='rounded-lg bg-muted/50 border border-border px-4 py-3'>
+                <p className='text-xs text-muted-foreground leading-relaxed italic'>
+                  By clicking <span className='font-semibold not-italic'>Complete &amp; Send for Sign-Off</span>, you confirm that all checked items on this checklist have been completed and verified
+                  by you. A sign-off link will be generated for the customer to review and digitally sign before the ticket is closed.
+                </p>
+              </div>
+
+              {checkedItems.size === 0 && (
+                <p className='flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400'>
+                  <AlertCircle className='h-3.5 w-3.5 shrink-0' />
+                  Check at least one completed task to enable ticket closure.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Sign-Off Link Panel — shown after work logs are saved */}
+          {signOffUrl && (
+            <div className='rounded-xl border border-green-200 bg-green-50 dark:bg-green-950/30 dark:border-green-800 p-4 space-y-3'>
+              <div className='flex items-center gap-2'>
+                <CheckCircle className='h-5 w-5 text-green-600 dark:text-green-400 shrink-0' />
+                <p className='text-sm font-semibold text-green-800 dark:text-green-300'>Work logs saved — sign-off link generated</p>
+              </div>
+              <p className='text-xs text-green-700 dark:text-green-400'>
+                Send the link below to the customer. It is valid for <strong>3 days</strong>. The ticket will close automatically once they sign.
+              </p>
+              <div className='flex items-center gap-2 rounded-lg border border-green-300 dark:border-green-700 bg-white dark:bg-green-950 px-3 py-2'>
+                <span className='flex-1 text-xs text-slate-700 dark:text-slate-300 truncate font-mono'>{signOffUrl}</span>
+                <button
+                  type='button'
+                  onClick={() => {
+                    navigator.clipboard.writeText(signOffUrl);
+                    showToast.success('Link copied!');
+                  }}
+                  className='shrink-0 text-xs font-medium text-green-700 dark:text-green-400 hover:underline'
+                >
+                  Copy
+                </button>
+              </div>
+              <div className='flex gap-2'>
+                <a
+                  href={`https://wa.me/?text=${encodeURIComponent(`Please sign off on the service completed at your location.\n\nTicket: ${ticket.ticketNumber}\nLink (valid 3 days): ${signOffUrl}`)}`}
+                  target='_blank'
+                  rel='noopener noreferrer'
+                  className='flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-[#25D366] hover:bg-[#1da851] text-white text-xs font-semibold py-2 transition-colors'
+                >
+                  <svg viewBox='0 0 24 24' className='h-4 w-4 fill-current'>
+                    <path d='M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z' />
+                  </svg>
+                  Share via WhatsApp
+                </a>
+                <button
+                  type='button'
+                  onClick={() => window.open(signOffUrl, '_blank')}
+                  className='flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 text-xs font-medium py-2 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors'
+                >
+                  Open Page
+                </button>
+              </div>
+              <Button
+                type='button'
+                onClick={() => {
+                  reset();
+                  setMachinePartsMap({});
+                  setCheckedItems(new Set());
+                  setSignOffUrl(null);
+                  onClose();
+                }}
+                className='w-full'
+                variant='outline'
+              >
+                Done — Close This Window
+              </Button>
+            </div>
+          )}
+
           {/* Submit Buttons */}
-          <div className='flex gap-3 pt-4'>
-            <Button type='submit' disabled={submitting || closingTicket} className='flex-1'>
-              {submitting ? (
-                <>
-                  <Loader2 className='h-4 w-4 mr-2 animate-spin' />
-                  Saving...
-                </>
-              ) : (
-                <>
-                  <CheckCircle className='h-4 w-4 mr-2' />
-                  Save Work Logs
-                </>
-              )}
-            </Button>
-            <Button
-              type='button'
-              onClick={handleSubmit(handleSaveAndClose)}
-              disabled={submitting || closingTicket || !formState.isValid}
-              className='flex-1 bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-800'
-            >
-              {closingTicket ? (
-                <>
-                  <Loader2 className='h-4 w-4 mr-2 animate-spin' />
-                  Closing...
-                </>
-              ) : (
-                <>
-                  <CheckCircle className='h-4 w-4 mr-2' />
-                  Save & Close Ticket
-                </>
-              )}
-            </Button>
-            <Button type='button' variant='outline' onClick={onClose} disabled={submitting || closingTicket} className='w-24'>
-              Cancel
-            </Button>
-          </div>
+          {!signOffUrl && (
+            <div className='flex flex-col-reverse sm:flex-row gap-3 pt-4'>
+              <Button type='submit' disabled={submitting || closingTicket} className='flex-1 sm:flex-1'>
+                {submitting ? (
+                  <>
+                    <Loader2 className='h-4 w-4 mr-2 animate-spin' />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className='h-4 w-4 mr-2' />
+                    Save Work Logs
+                  </>
+                )}
+              </Button>
+              <Button
+                type='button'
+                onClick={handleSubmit(handleSaveAndClose)}
+                disabled={submitting || closingTicket || !formState.isValid || checkedItems.size === 0}
+                className='flex-1 bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-800'
+              >
+                {closingTicket ? (
+                  <>
+                    <Loader2 className='h-4 w-4 mr-2 animate-spin' />
+                    Generating link...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className='h-4 w-4 mr-2' />
+                    Complete &amp; Send for Sign-Off
+                  </>
+                )}
+              </Button>
+              <Button type='button' variant='outline' onClick={onClose} disabled={submitting || closingTicket} className='w-full sm:w-24'>
+                Cancel
+              </Button>
+            </div>
+          )}
         </form>
       </DialogContent>
     </Dialog>

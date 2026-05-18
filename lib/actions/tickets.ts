@@ -1,4 +1,4 @@
-'use server';
+﻿'use server';
 
 import { adminDb } from '@/lib/firebase/admin';
 import { getCurrentUser } from '@/lib/auth/session';
@@ -8,6 +8,13 @@ import { Timestamp } from 'firebase-admin/firestore';
 import { unstable_cache } from 'next/cache';
 import { CACHE_TAGS, revalidateCache } from '@/lib/cache';
 import { updateCallAdminAggregatesOnCreate, updateCallAdminAggregatesOnStatusChange } from './aggregates';
+import { sendTicketCreatedEmail, sendTicketAssignedEmail } from '@/lib/email';
+import { appendPartsToMachine } from './machines';
+
+/** Returns the Firestore collection ref scoped to a store. */
+function storeCol(storeId: string, col: string) {
+  return adminDb.collection('stores').doc(storeId).collection(col);
+}
 
 export interface CustomerForTicket {
   id: string;
@@ -27,65 +34,36 @@ export interface TechnicianForTicket {
   name: string;
 }
 
-// Cached function to get customers for tickets
-const getCachedCustomersForTickets = unstable_cache(
-  async () => {
-    try {
-      const snapshot = await adminDb.collection('customers').get();
-      const customers = snapshot.docs
-        .filter((doc) => !doc.data().isDisabled) // Filter out disabled customers
+export async function getCustomersForTickets(): Promise<CustomerForTicket[]> {
+  const user = await getCurrentUser();
+  if (!user?.storeId) return [];
+
+  const storeId = user.storeId;
+  const cached = unstable_cache(
+    async () => {
+      const snapshot = await storeCol(storeId, 'customers').get();
+      return snapshot.docs
+        .filter((doc) => !doc.data().isDisabled)
         .map((doc) => ({
           id: doc.id,
           companyName: doc.data().companyName,
           contactPerson: doc.data().contactPerson,
         }));
-
-      console.log(`[Cache] Fetched ${customers.length} customers for tickets from Firestore`);
-      return customers;
-    } catch (error: any) {
-      console.error('Error fetching customers:', error);
-      return [];
-    }
-  },
-  [CACHE_TAGS.CUSTOMERS],
-  { tags: [CACHE_TAGS.CUSTOMERS], revalidate: false },
-);
-
-// Cached function to get technicians for assignment
-const getCachedTechniciansForAssignment = unstable_cache(
-  async () => {
-    try {
-      const snapshot = await adminDb.collection('users').where('role', '==', 'technician').get();
-      const technicians = snapshot.docs
-        .filter((doc) => !doc.data().disabled) // Filter out disabled technicians
-        .map((doc) => ({
-          id: doc.id,
-          name: doc.data().name,
-        }));
-
-      console.log(`[Cache] Fetched ${technicians.length} active technicians from Firestore`);
-      return technicians;
-    } catch (error: any) {
-      console.error('Error fetching technicians:', error);
-      return [];
-    }
-  },
-  [CACHE_TAGS.TECHNICIANS],
-  { tags: [CACHE_TAGS.TECHNICIANS], revalidate: false },
-);
-
-export async function getCustomersForTickets(): Promise<CustomerForTicket[]> {
-  return getCachedCustomersForTickets();
+    },
+    [`${CACHE_TAGS.CUSTOMERS}-${storeId}`],
+    { tags: [`${CACHE_TAGS.CUSTOMERS}-${storeId}`], revalidate: false },
+  );
+  return cached();
 }
 
 export async function getMachinesForCustomer(customerId: string): Promise<MachineForTicket[]> {
   try {
     const user = await getCurrentUser();
-    if (!user || !['admin', 'call_admin', 'management'].includes(user.role)) {
+    if (!user?.storeId || !['super_admin', 'store_admin', 'store_manager', 'call_admin'].includes(user.role)) {
       return [];
     }
 
-    const snapshot = await adminDb.collection('machines').where('customerId', '==', customerId).get();
+    const snapshot = await storeCol(user.storeId, 'machines').where('customerId', '==', customerId).get();
     return snapshot.docs.map((doc) => ({
       id: doc.id,
       customerId: doc.data().customerId,
@@ -99,25 +77,35 @@ export async function getMachinesForCustomer(customerId: string): Promise<Machin
 }
 
 export async function getTechniciansForAssignment(): Promise<TechnicianForTicket[]> {
-  return getCachedTechniciansForAssignment();
+  const user = await getCurrentUser();
+  if (!user?.storeId) return [];
+
+  const storeId = user.storeId;
+  const cached = unstable_cache(
+    async () => {
+      const snapshot = await adminDb.collection('users').where('role', '==', 'technician').where('storeId', '==', storeId).get();
+      return snapshot.docs.filter((doc) => !doc.data().disabled).map((doc) => ({ id: doc.id, name: doc.data().name }));
+    },
+    [`${CACHE_TAGS.TECHNICIANS}-${storeId}`],
+    { tags: [`${CACHE_TAGS.TECHNICIANS}-${storeId}`], revalidate: false },
+  );
+  return cached();
 }
 
 export async function createTicket(data: any) {
   try {
     const user = await getCurrentUser();
-    if (!user || !['admin', 'call_admin', 'management'].includes(user.role)) {
+    if (!user?.storeId || !['super_admin', 'store_admin', 'store_manager', 'call_admin'].includes(user.role)) {
       return { success: false, error: 'Unauthorized' };
     }
 
-    // Validate data against new schema
+    const storeId = user.storeId;
     const validated = createTicketSchema.parse(data);
 
-    // Validate machines array
     if (!validated.machines || validated.machines.length === 0) {
       return { success: false, error: 'At least one machine is required' };
     }
 
-    // Generate ticket number
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -126,51 +114,108 @@ export async function createTicket(data: any) {
     const startOfDay = new Date(year, now.getMonth(), now.getDate());
     const endOfDay = new Date(year, now.getMonth(), now.getDate() + 1);
 
-    const todayTickets = await adminDb.collection('tickets').where('createdAt', '>=', Timestamp.fromDate(startOfDay)).where('createdAt', '<', Timestamp.fromDate(endOfDay)).get();
+    const todayTickets = await storeCol(storeId, 'tickets').where('createdAt', '>=', Timestamp.fromDate(startOfDay)).where('createdAt', '<', Timestamp.fromDate(endOfDay)).get();
 
     const count = String(todayTickets.size + 1).padStart(3, '0');
     const ticketNumber = `TKT-${year}${month}${day}-${count}`;
 
-    // Get assigned user name if technician is assigned
-    let assignedToName = null;
+    let assignedToName: string | null = null;
+    let assignedTechEmail: string | undefined;
     if (validated.assignedTo) {
       const assignedUserDoc = await adminDb.collection('users').doc(validated.assignedTo).get();
-      assignedToName = assignedUserDoc.exists ? assignedUserDoc.data()?.name : null;
+      if (assignedUserDoc.exists) {
+        const d = assignedUserDoc.data();
+        assignedToName = d?.name ?? null;
+        assignedTechEmail = d?.email;
+      }
     }
 
-    // Create ticket with multi-machine support
     const ticketData = {
       ticketNumber,
-      machines: validated.machines, // Array of machines being serviced
+      machines: validated.machines,
+      briefDescription: validated.briefDescription || null,
       issueDescription: validated.issueDescription,
+      internalNotes: validated.internalNotes || null,
       contactPerson: validated.contactPerson,
       assignedTo: validated.assignedTo || null,
       assignedToName: assignedToName,
-      status: validated.assignedTo ? 'Assigned' : 'Open', // Open if no technician, Assigned if technician is set
+      status: validated.assignedTo ? 'Assigned' : 'Open',
       scheduledVisitDate: validated.scheduledVisitDate ? Timestamp.fromDate(validated.scheduledVisitDate) : null,
       additionalNotes: validated.additionalNotes || null,
+      storeId,
       createdAt: Timestamp.now(),
       updatedAt: Timestamp.now(),
       createdBy: user.uid,
+      statusHistory: [
+        {
+          status: validated.assignedTo ? 'Assigned' : 'Open',
+          changedAt: Timestamp.now(),
+          changedByUid: user.uid,
+          changedByName: user.name,
+        },
+      ],
     };
 
-    const docRef = await adminDb.collection('tickets').add(ticketData);
+    const docRef = await storeCol(storeId, 'tickets').add(ticketData);
 
-    // Update call admin aggregates if creator is a call admin
+    // One-time auto-activate: promote store from 'onboarding' → 'active' on first ticket
+    const storeDoc = await adminDb.collection('stores').doc(storeId).get();
+    if (storeDoc.exists && storeDoc.data()?.status === 'onboarding') {
+      await adminDb.collection('stores').doc(storeId).update({ status: 'active', updatedAt: Timestamp.now() });
+      await revalidateCache([CACHE_TAGS.STORES]);
+    }
+
     const creatorDoc = await adminDb.collection('users').doc(user.uid).get();
     if (creatorDoc.exists && creatorDoc.data()?.role === 'call_admin') {
       await updateCallAdminAggregatesOnCreate(user.uid, ticketData);
     }
 
-    // Invalidate cache for tickets and technicians
-    await revalidateCache([CACHE_TAGS.TICKETS]);
-    await revalidateCache([CACHE_TAGS.TECHNICIANS]);
+    await revalidateCache([`${CACHE_TAGS.TICKETS}-${storeId}`, CACHE_TAGS.TICKETS]);
+    await revalidateCache([`${CACHE_TAGS.TECHNICIANS}-${storeId}`]);
     await revalidateCache([CACHE_TAGS.REPORTS]);
     await revalidateCache([`${CACHE_TAGS.CALL_ADMINS}-${user.uid}`]);
     revalidatePath('/tickets');
     revalidatePath('/dashboard');
-    revalidatePath('/(protected)/(admin)/tickets');
-    revalidatePath('/(protected)/(admin)/call-admin');
+
+    // Send ticket notification emails — non-blocking
+    const storeName = user.storeName ?? storeId;
+    const machineSummary = validated.machines.map((m: any) => ({
+      customerName: m.customerName,
+      machineType: m.machineType,
+      serialNumber: m.serialNumber,
+      priority: m.priority,
+    }));
+    const scheduledDate = validated.scheduledVisitDate ?? null;
+
+    // Confirmation to the creator
+    if (user.email) {
+      sendTicketCreatedEmail({
+        to: user.email,
+        creatorName: user.name,
+        ticketNumber,
+        ticketId: docRef.id,
+        storeName,
+        machines: machineSummary,
+        issueDescription: validated.issueDescription,
+        assignedToName,
+        scheduledDate,
+      }).catch((e) => console.error('sendTicketCreatedEmail failed:', e));
+    }
+
+    // Assignment notification to the technician
+    if (validated.assignedTo && assignedTechEmail) {
+      sendTicketAssignedEmail({
+        to: assignedTechEmail,
+        technicianName: assignedToName ?? 'Technician',
+        ticketNumber,
+        ticketId: docRef.id,
+        storeName,
+        machines: machineSummary,
+        issueDescription: validated.issueDescription,
+        createdByName: user.name,
+        scheduledDate,
+      }).catch((e) => console.error('sendTicketAssignedEmail failed:', e));
+    }
 
     return { success: true, ticketId: docRef.id, ticketNumber };
   } catch (error: any) {
@@ -182,12 +227,12 @@ export async function createTicket(data: any) {
 export async function updateTicket(ticketId: string, data: any) {
   try {
     const user = await getCurrentUser();
-    if (!user || !['admin', 'call_admin', 'management'].includes(user.role)) {
+    if (!user?.storeId || !['super_admin', 'store_admin', 'store_manager', 'call_admin'].includes(user.role)) {
       return { success: false, error: 'Unauthorized' };
     }
 
-    // Get current ticket to check for status changes
-    const ticketDoc = await adminDb.collection('tickets').doc(ticketId).get();
+    const storeId = user.storeId;
+    const ticketDoc = await storeCol(storeId, 'tickets').doc(ticketId).get();
     if (!ticketDoc.exists) {
       return { success: false, error: 'Ticket not found' };
     }
@@ -202,17 +247,14 @@ export async function updateTicket(ticketId: string, data: any) {
       updatedAt: Timestamp.now(),
     };
 
-    // Handle scheduledVisitDate conversion
     if (validated.scheduledVisitDate !== undefined) {
       if (validated.scheduledVisitDate === null) {
-        // Explicitly clear the field
         updateData.scheduledVisitDate = null;
       } else if (validated.scheduledVisitDate instanceof Date) {
         updateData.scheduledVisitDate = Timestamp.fromDate(validated.scheduledVisitDate);
       }
     }
 
-    // If assigning, update assignedToName
     if (validated.assignedTo) {
       const assignedUserDoc = await adminDb.collection('users').doc(validated.assignedTo).get();
       if (assignedUserDoc.exists) {
@@ -223,7 +265,6 @@ export async function updateTicket(ticketId: string, data: any) {
       }
     }
 
-    // If status changed and ticket was created by call admin, update aggregates
     const newStatus = updateData.status || oldStatus;
     if (oldStatus && newStatus !== oldStatus && currentTicketData?.createdBy) {
       const creatorDoc = await adminDb.collection('users').doc(currentTicketData.createdBy).get();
@@ -232,11 +273,21 @@ export async function updateTicket(ticketId: string, data: any) {
       }
     }
 
-    await adminDb.collection('tickets').doc(ticketId).update(updateData);
+    // Append to status history whenever status actually changes
+    if (oldStatus && newStatus !== oldStatus) {
+      const { FieldValue } = await import('firebase-admin/firestore');
+      updateData.statusHistory = FieldValue.arrayUnion({
+        status: newStatus,
+        changedAt: Timestamp.now(),
+        changedByUid: user.uid,
+        changedByName: user.name,
+      });
+    }
 
-    // Invalidate cache for tickets and technicians
-    await revalidateCache([CACHE_TAGS.TICKETS]);
-    await revalidateCache([CACHE_TAGS.TECHNICIANS]);
+    await storeCol(storeId, 'tickets').doc(ticketId).update(updateData);
+
+    await revalidateCache([`${CACHE_TAGS.TICKETS}-${storeId}`, CACHE_TAGS.TICKETS]);
+    await revalidateCache([`${CACHE_TAGS.TECHNICIANS}-${storeId}`]);
     await revalidateCache([CACHE_TAGS.REPORTS]);
     if (currentTicketData?.createdBy) {
       await revalidateCache([`${CACHE_TAGS.CALL_ADMINS}-${currentTicketData.createdBy}`]);
@@ -244,8 +295,6 @@ export async function updateTicket(ticketId: string, data: any) {
     revalidatePath('/tickets');
     revalidatePath(`/tickets/${ticketId}`);
     revalidatePath('/dashboard');
-    revalidatePath('/(protected)/(admin)/tickets');
-    revalidatePath('/(protected)/(admin)/call-admin');
 
     return { success: true };
   } catch (error: any) {
@@ -257,12 +306,12 @@ export async function updateTicket(ticketId: string, data: any) {
 export async function addWorkLogEntry(ticketId: string, machineId: string, data: any) {
   try {
     const user = await getCurrentUser();
-    if (!user || user.role !== 'technician') {
+    if (!user?.storeId || user.role !== 'technician') {
       return { success: false, error: 'Unauthorized' };
     }
 
-    // Verify ticket is assigned to this technician
-    const ticketDoc = await adminDb.collection('tickets').doc(ticketId).get();
+    const storeId = user.storeId;
+    const ticketDoc = await storeCol(storeId, 'tickets').doc(ticketId).get();
     if (!ticketDoc.exists) {
       return { success: false, error: 'Ticket not found' };
     }
@@ -274,14 +323,12 @@ export async function addWorkLogEntry(ticketId: string, machineId: string, data:
 
     const validated = technicianUpdateSchema.parse(data);
 
-    // Find the machine details from the ticket
     const ticketMachine = ticketData?.machines?.find((m: any) => m.machineId === machineId);
     if (!ticketMachine) {
       return { success: false, error: 'Machine not found in ticket' };
     }
 
-    // Find or create the work log entry for this machine
-    const workLogsQuery = await adminDb.collection('machineWorkLogs').where('ticketId', '==', ticketId).where('machineId', '==', machineId).get();
+    const workLogsQuery = await storeCol(storeId, 'machineWorkLogs').where('ticketId', '==', ticketId).where('machineId', '==', machineId).get();
 
     const updateData: any = {
       ...validated,
@@ -289,13 +336,8 @@ export async function addWorkLogEntry(ticketId: string, machineId: string, data:
       updatedAt: Timestamp.now(),
     };
 
-    // Convert dates to timestamps
-    if (validated.arrivalTime) {
-      updateData.arrivalTime = Timestamp.fromDate(validated.arrivalTime);
-    }
-    if (validated.departureTime) {
-      updateData.departureTime = Timestamp.fromDate(validated.departureTime);
-    }
+    if (validated.arrivalTime) updateData.arrivalTime = Timestamp.fromDate(validated.arrivalTime);
+    if (validated.departureTime) updateData.departureTime = Timestamp.fromDate(validated.departureTime);
     if (validated.maintenanceRecommendation?.date) {
       updateData.maintenanceRecommendation = {
         ...validated.maintenanceRecommendation,
@@ -304,8 +346,7 @@ export async function addWorkLogEntry(ticketId: string, machineId: string, data:
     }
 
     if (workLogsQuery.empty) {
-      // Create new work log if it doesn't exist
-      await adminDb.collection('machineWorkLogs').add({
+      await storeCol(storeId, 'machineWorkLogs').add({
         ticketId,
         machineId,
         machineType: ticketMachine.machineType,
@@ -314,19 +355,13 @@ export async function addWorkLogEntry(ticketId: string, machineId: string, data:
         createdAt: Timestamp.now(),
       });
     } else {
-      // Update existing work log
-      const workLogDoc = workLogsQuery.docs[0];
-      await workLogDoc.ref.update(updateData);
+      await workLogsQuery.docs[0].ref.update(updateData);
     }
 
-    // Invalidate work logs cache
-    await revalidateCache([CACHE_TAGS.WORK_LOGS]);
-    await revalidateCache([CACHE_TAGS.REPORTS]);
-    await revalidateCache([`${CACHE_TAGS.WORK_LOGS}-${ticketId}`]);
+    await revalidateCache([CACHE_TAGS.WORK_LOGS, CACHE_TAGS.REPORTS, `${CACHE_TAGS.WORK_LOGS}-${ticketId}`]);
     revalidatePath('/tickets');
     revalidatePath(`/tickets/${ticketId}`);
     revalidatePath('/dashboard');
-    revalidatePath('/(protected)/tickets');
 
     return { success: true };
   } catch (error: any) {
@@ -335,16 +370,15 @@ export async function addWorkLogEntry(ticketId: string, machineId: string, data:
   }
 }
 
-// Bulk work log entry for multiple machines with shared visit data
 export async function addBulkWorkLogEntries(ticketId: string, data: any) {
   try {
     const user = await getCurrentUser();
-    if (!user || user.role !== 'technician') {
+    if (!user?.storeId || user.role !== 'technician') {
       return { success: false, error: 'Unauthorized' };
     }
 
-    // Verify ticket is assigned to this technician
-    const ticketDoc = await adminDb.collection('tickets').doc(ticketId).get();
+    const storeId = user.storeId;
+    const ticketDoc = await storeCol(storeId, 'tickets').doc(ticketId).get();
     if (!ticketDoc.exists) {
       return { success: false, error: 'Ticket not found' };
     }
@@ -357,42 +391,30 @@ export async function addBulkWorkLogEntries(ticketId: string, data: any) {
     const { bulkWorkLogSchema } = await import('@/lib/schemas');
     const validated = bulkWorkLogSchema.parse(data);
 
-    // Visit-level timestamps (shared across all machines)
     const arrivalTimestamp = Timestamp.fromDate(validated.arrivalTime);
     const departureTimestamp = validated.departureTime ? Timestamp.fromDate(validated.departureTime) : undefined;
 
-    // Process each machine's work log
     const batch = adminDb.batch();
     let processedCount = 0;
 
     for (const machineLog of validated.machineWorkLogs) {
-      // Find the machine details from the ticket
       const ticketMachine = ticketData?.machines?.find((m: any) => m.machineId === machineLog.machineId);
-      if (!ticketMachine) {
-        continue; // Skip if machine not found
-      }
+      if (!ticketMachine) continue;
 
-      // Check if work log already exists
-      const workLogsQuery = await adminDb.collection('machineWorkLogs').where('ticketId', '==', ticketId).where('machineId', '==', machineLog.machineId).get();
+      const workLogsQuery = await storeCol(storeId, 'machineWorkLogs').where('ticketId', '==', ticketId).where('machineId', '==', machineLog.machineId).get();
 
       const workLogData: any = {
-        // Visit-level data (same for all machines)
         arrivalTime: arrivalTimestamp,
         departureTime: departureTimestamp,
         hoursWorked: validated.hoursWorked,
-
-        // Machine-specific data
         workPerformed: machineLog.workPerformed,
         outcome: machineLog.outcome,
         repairs: machineLog.repairs,
         partsUsed: machineLog.partsUsed || [],
-
-        // Metadata
         recordedBy: user.uid,
         updatedAt: Timestamp.now(),
       };
 
-      // Handle maintenance recommendation
       if (machineLog.maintenanceRecommendation?.date && machineLog.maintenanceRecommendation?.notes) {
         workLogData.maintenanceRecommendation = {
           date: Timestamp.fromDate(machineLog.maintenanceRecommendation.date),
@@ -401,8 +423,7 @@ export async function addBulkWorkLogEntries(ticketId: string, data: any) {
       }
 
       if (workLogsQuery.empty) {
-        // Create new work log
-        const newDocRef = adminDb.collection('machineWorkLogs').doc();
+        const newDocRef = storeCol(storeId, 'machineWorkLogs').doc();
         batch.set(newDocRef, {
           ticketId,
           machineId: machineLog.machineId,
@@ -412,25 +433,29 @@ export async function addBulkWorkLogEntries(ticketId: string, data: any) {
           createdAt: Timestamp.now(),
         });
       } else {
-        // Update existing work log
-        const workLogDoc = workLogsQuery.docs[0];
-        batch.update(workLogDoc.ref, workLogData);
+        batch.update(workLogsQuery.docs[0].ref, workLogData);
       }
 
       processedCount++;
     }
 
-    // Commit all changes in a single batch
     await batch.commit();
 
-    // Invalidate caches
-    await revalidateCache([CACHE_TAGS.WORK_LOGS]);
-    await revalidateCache([CACHE_TAGS.REPORTS]);
-    await revalidateCache([`${CACHE_TAGS.WORK_LOGS}-${ticketId}`]);
+    // Auto-associate parts with each machine (non-blocking, best-effort)
+    for (const machineLog of validated.machineWorkLogs) {
+      const parts = (machineLog.partsUsed ?? []).filter((p: any) => p.partName?.trim());
+      if (parts.length > 0 && machineLog.machineId) {
+        appendPartsToMachine(
+          machineLog.machineId,
+          parts.map((p: any) => ({ partId: p.partId, partName: p.partName })),
+        ).catch((e) => console.error('appendPartsToMachine failed:', e));
+      }
+    }
+
+    await revalidateCache([CACHE_TAGS.WORK_LOGS, CACHE_TAGS.REPORTS, `${CACHE_TAGS.WORK_LOGS}-${ticketId}`]);
     revalidatePath('/tickets');
     revalidatePath(`/tickets/${ticketId}`);
     revalidatePath('/dashboard');
-    revalidatePath('/(protected)/tickets');
 
     return { success: true, count: processedCount };
   } catch (error: any) {
@@ -442,12 +467,12 @@ export async function addBulkWorkLogEntries(ticketId: string, data: any) {
 export async function closeTicket(ticketId: string) {
   try {
     const user = await getCurrentUser();
-    if (!user || user.role !== 'technician') {
+    if (!user?.storeId || user.role !== 'technician') {
       return { success: false, error: 'Unauthorized' };
     }
 
-    // Verify ticket is assigned to this technician
-    const ticketDoc = await adminDb.collection('tickets').doc(ticketId).get();
+    const storeId = user.storeId;
+    const ticketDoc = await storeCol(storeId, 'tickets').doc(ticketId).get();
     if (!ticketDoc.exists) {
       return { success: false, error: 'Ticket not found' };
     }
@@ -457,19 +482,12 @@ export async function closeTicket(ticketId: string) {
       return { success: false, error: 'This ticket is not assigned to you' };
     }
 
-    // Check that all machines have work logs with work performed
-    const workLogs = await adminDb.collection('machineWorkLogs').where('ticketId', '==', ticketId).get();
-
-    // Get all machine IDs from the ticket
+    const workLogs = await storeCol(storeId, 'machineWorkLogs').where('ticketId', '==', ticketId).get();
     const ticketMachineIds = (ticketData?.machines || []).map((m: any) => m.machineId);
 
-    // Create a map of machine IDs to work logs
     const workLogsByMachine = new Map();
-    workLogs.docs.forEach((doc) => {
-      workLogsByMachine.set(doc.data().machineId, doc.data());
-    });
+    workLogs.docs.forEach((doc) => workLogsByMachine.set(doc.data().machineId, doc.data()));
 
-    // Verify each machine has a work log with required fields
     for (const machineId of ticketMachineIds) {
       const logData = workLogsByMachine.get(machineId);
       if (!logData || !logData.workPerformed || !logData.outcome) {
@@ -477,22 +495,24 @@ export async function closeTicket(ticketId: string) {
       }
     }
 
-    // Close the ticket
-    await adminDb.collection('tickets').doc(ticketId).update({
-      status: 'Closed',
-      closedAt: Timestamp.now(),
-      updatedAt: Timestamp.now(),
-    });
+    await storeCol(storeId, 'tickets')
+      .doc(ticketId)
+      .update({
+        status: 'Closed',
+        closedAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+        statusHistory: (await import('firebase-admin/firestore')).FieldValue.arrayUnion({
+          status: 'Closed',
+          changedAt: Timestamp.now(),
+          changedByUid: user.uid,
+          changedByName: user.name,
+        }),
+      });
 
-    // Invalidate caches
-    await revalidateCache([CACHE_TAGS.TICKETS]);
-    await revalidateCache([CACHE_TAGS.WORK_LOGS]);
-    await revalidateCache([CACHE_TAGS.REPORTS]);
+    await revalidateCache([`${CACHE_TAGS.TICKETS}-${storeId}`, CACHE_TAGS.TICKETS, CACHE_TAGS.WORK_LOGS, CACHE_TAGS.REPORTS]);
     revalidatePath('/tickets');
     revalidatePath(`/tickets/${ticketId}`);
     revalidatePath('/dashboard');
-    revalidatePath('/(protected)/tickets');
-    revalidatePath('/(protected)/(admin)/tickets');
 
     return { success: true };
   } catch (error: any) {
@@ -504,12 +524,12 @@ export async function closeTicket(ticketId: string) {
 export async function technicianUpdateTicket(ticketId: string, data: any) {
   try {
     const user = await getCurrentUser();
-    if (!user || user.role !== 'technician') {
+    if (!user?.storeId || user.role !== 'technician') {
       return { success: false, error: 'Unauthorized' };
     }
 
-    // Verify ticket is assigned to this technician
-    const ticketDoc = await adminDb.collection('tickets').doc(ticketId).get();
+    const storeId = user.storeId;
+    const ticketDoc = await storeCol(storeId, 'tickets').doc(ticketId).get();
     if (!ticketDoc.exists) {
       return { success: false, error: 'Ticket not found' };
     }
@@ -526,10 +546,7 @@ export async function technicianUpdateTicket(ticketId: string, data: any) {
       updatedAt: Timestamp.now(),
     };
 
-    // Convert dates to timestamps
-    if (validated.arrivalTime) {
-      updateData.arrivalTime = Timestamp.fromDate(validated.arrivalTime);
-    }
+    if (validated.arrivalTime) updateData.arrivalTime = Timestamp.fromDate(validated.arrivalTime);
     if (validated.departureTime) {
       updateData.departureTime = Timestamp.fromDate(validated.departureTime);
       updateData.status = 'Closed';
@@ -542,17 +559,12 @@ export async function technicianUpdateTicket(ticketId: string, data: any) {
       };
     }
 
-    await adminDb.collection('tickets').doc(ticketId).update(updateData);
+    await storeCol(storeId, 'tickets').doc(ticketId).update(updateData);
 
-    // Invalidate cache for tickets
-    await revalidateCache([CACHE_TAGS.TICKETS]);
-    await revalidateCache([CACHE_TAGS.REPORTS]);
+    await revalidateCache([`${CACHE_TAGS.TICKETS}-${storeId}`, CACHE_TAGS.TICKETS, CACHE_TAGS.REPORTS]);
     revalidatePath('/tickets');
     revalidatePath(`/tickets/${ticketId}`);
     revalidatePath('/dashboard');
-    revalidatePath('/(protected)/tickets');
-    revalidatePath('/(protected)/(admin)/tickets');
-    revalidatePath('/(protected)/(admin)/call-admin');
 
     return { success: true };
   } catch (error: any) {
@@ -564,11 +576,11 @@ export async function technicianUpdateTicket(ticketId: string, data: any) {
 export async function getWorkLogsForTicket(ticketId: string) {
   try {
     const user = await getCurrentUser();
-    if (!user) {
+    if (!user?.storeId) {
       return { success: false, error: 'Unauthorized' };
     }
 
-    const workLogsSnapshot = await adminDb.collection('machineWorkLogs').where('ticketId', '==', ticketId).get();
+    const workLogsSnapshot = await storeCol(user.storeId, 'machineWorkLogs').where('ticketId', '==', ticketId).get();
 
     const workLogs = workLogsSnapshot.docs.map((doc) => {
       const data = doc.data();
@@ -600,5 +612,224 @@ export async function getWorkLogsForTicket(ticketId: string) {
   } catch (error: any) {
     console.error('Error fetching work logs:', error);
     return { success: false, error: error.message || 'Failed to fetch work logs' };
+  }
+}
+
+// ─── getStoreTickets ──────────────────────────────────────────────────────────
+// Server-side ticket fetch for the technicians page and schedule page.
+// Uses admin SDK — bypasses Firestore client rules.
+
+export interface StoreTicketRow {
+  id: string;
+  ticketNumber: string;
+  status: string;
+  issueDescription: string;
+  assignedTo: string | null;
+  assignedToName: string | null;
+  createdBy: string;
+  createdAt: Date | null;
+  closedAt: Date | null;
+  updatedAt: Date | null;
+  scheduledVisitDate: Date | null;
+  storeId: string;
+  machines: any[];
+  contactPerson?: string;
+  additionalNotes?: string;
+}
+
+export async function getStoreTickets(): Promise<StoreTicketRow[]> {
+  try {
+    const user = await getCurrentUser();
+    if (!user) return [];
+
+    let snap: FirebaseFirestore.QuerySnapshot;
+
+    if (user.role === 'technician' && user.storeId) {
+      snap = await storeCol(user.storeId, 'tickets').where('assignedTo', '==', user.uid).orderBy('createdAt', 'desc').get();
+    } else if (user.storeId) {
+      snap = await storeCol(user.storeId, 'tickets').orderBy('createdAt', 'desc').get();
+    } else if (user.role === 'super_admin' || user.role === 'manager') {
+      // HQ — use collection group to span all stores
+      snap = await adminDb.collectionGroup('tickets').orderBy('createdAt', 'desc').get();
+    } else {
+      return [];
+    }
+
+    return snap.docs.map((doc) => {
+      const d = doc.data();
+      return {
+        id: doc.id,
+        ticketNumber: d.ticketNumber ?? '',
+        status: d.status ?? '',
+        issueDescription: d.issueDescription ?? '',
+        assignedTo: d.assignedTo ?? null,
+        assignedToName: d.assignedToName ?? null,
+        createdBy: d.createdBy ?? '',
+        createdAt: d.createdAt?.toDate() ?? null,
+        closedAt: d.closedAt?.toDate() ?? null,
+        updatedAt: d.updatedAt?.toDate() ?? null,
+        scheduledVisitDate: d.scheduledVisitDate?.toDate() ?? null,
+        storeId: d.storeId ?? user.storeId ?? '',
+        machines: d.machines ?? [],
+        contactPerson: d.contactPerson ?? undefined,
+        additionalNotes: d.additionalNotes ?? undefined,
+      };
+    });
+  } catch (error: any) {
+    console.error('getStoreTickets error:', error);
+    return [];
+  }
+}
+
+export async function getTechnicianTickets(technicianId: string): Promise<StoreTicketRow[]> {
+  try {
+    const user = await getCurrentUser();
+    if (!user || !['super_admin', 'store_admin', 'manager'].includes(user.role)) return [];
+
+    let snap: FirebaseFirestore.QuerySnapshot;
+    if (user.storeId) {
+      snap = await storeCol(user.storeId, 'tickets').where('assignedTo', '==', technicianId).orderBy('createdAt', 'desc').get();
+    } else {
+      snap = await adminDb.collectionGroup('tickets').where('assignedTo', '==', technicianId).orderBy('createdAt', 'desc').get();
+    }
+
+    return snap.docs.map((doc) => {
+      const d = doc.data();
+      return {
+        id: doc.id,
+        ticketNumber: d.ticketNumber ?? '',
+        status: d.status ?? '',
+        issueDescription: d.issueDescription ?? '',
+        assignedTo: d.assignedTo ?? null,
+        assignedToName: d.assignedToName ?? null,
+        createdBy: d.createdBy ?? '',
+        createdAt: d.createdAt?.toDate() ?? null,
+        closedAt: d.closedAt?.toDate() ?? null,
+        updatedAt: d.updatedAt?.toDate() ?? null,
+        scheduledVisitDate: d.scheduledVisitDate?.toDate() ?? null,
+        storeId: d.storeId ?? '',
+        machines: d.machines ?? [],
+        contactPerson: d.contactPerson ?? undefined,
+        additionalNotes: d.additionalNotes ?? undefined,
+      };
+    });
+  } catch (error: any) {
+    console.error('getTechnicianTickets error:', error);
+    return [];
+  }
+}
+
+// ── Sign-Off Token ─────────────────────────────────────────────────────────────
+
+const SIGN_OFF_EXPIRY_HOURS = 72; // 3 days
+
+/**
+ * Generates (or regenerates) a secure sign-off token for a ticket.
+ * Stores the token in a top-level `signOffTokens` collection for fast
+ * public lookup, and also writes the link info to the ticket document.
+ * Any previous token is superseded so only one link is valid at a time.
+ */
+export async function generateSignOffToken(ticketId: string): Promise<{ success: boolean; token?: string; error?: string }> {
+  try {
+    const user = await getCurrentUser();
+    if (!user?.storeId || !['super_admin', 'store_admin', 'store_manager', 'technician'].includes(user.role)) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    const storeId = user.storeId;
+    const ticketDoc = await storeCol(storeId, 'tickets').doc(ticketId).get();
+    if (!ticketDoc.exists) return { success: false, error: 'Ticket not found' };
+    if (ticketDoc.data()?.status === 'Closed') return { success: false, error: 'Ticket is already closed' };
+
+    const { randomUUID } = await import('crypto');
+    const token = randomUUID();
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + SIGN_OFF_EXPIRY_HOURS * 60 * 60 * 1000);
+    const nowTs = Timestamp.fromDate(now);
+    const expiresTs = Timestamp.fromDate(expiresAt);
+
+    // Supersede any existing token so only this new link is valid
+    const existingToken = ticketDoc.data()?.signOffLink?.token;
+    if (existingToken) {
+      await adminDb
+        .collection('signOffTokens')
+        .doc(existingToken)
+        .update({ superseded: true })
+        .catch(() => {});
+    }
+
+    // Write token to fast-lookup collection (no auth required — API route uses Admin SDK)
+    await adminDb.collection('signOffTokens').doc(token).set({
+      storeId,
+      ticketId,
+      createdAt: nowTs,
+      expiresAt: expiresTs,
+      used: false,
+      superseded: false,
+    });
+
+    // Write link metadata to the ticket document
+    await storeCol(storeId, 'tickets')
+      .doc(ticketId)
+      .update({
+        signOffLink: { token, createdAt: nowTs, expiresAt: expiresTs },
+        updatedAt: nowTs,
+      });
+
+    await revalidateCache([`${CACHE_TAGS.TICKETS}-${storeId}`, CACHE_TAGS.TICKETS]);
+    revalidatePath(`/tickets/${ticketId}`);
+
+    return { success: true, token };
+  } catch (error: any) {
+    console.error('Error generating sign-off token:', error);
+    return { success: false, error: error.message || 'Failed to generate sign-off link' };
+  }
+}
+
+/**
+ * Allows store admins / managers to force-close a ticket without customer sign-off.
+ * Used when the customer is unresponsive beyond an acceptable timeframe.
+ */
+export async function adminForceCloseTicket(ticketId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const user = await getCurrentUser();
+    if (!user?.storeId || !['super_admin', 'store_admin', 'store_manager'].includes(user.role)) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    const storeId = user.storeId;
+    const ticketDoc = await storeCol(storeId, 'tickets').doc(ticketId).get();
+    if (!ticketDoc.exists) return { success: false, error: 'Ticket not found' };
+    if (ticketDoc.data()?.status === 'Closed') return { success: false, error: 'Ticket is already closed' };
+
+    const { FieldValue } = await import('firebase-admin/firestore');
+    const now = Timestamp.now();
+
+    await storeCol(storeId, 'tickets')
+      .doc(ticketId)
+      .update({
+        status: 'Closed',
+        closedAt: now,
+        updatedAt: now,
+        forceClosedBy: user.uid,
+        forceClosedByName: user.name,
+        statusHistory: FieldValue.arrayUnion({
+          status: 'Closed',
+          changedAt: now,
+          changedByUid: user.uid,
+          changedByName: user.name,
+          note: 'Force closed by admin — no customer sign-off',
+        }),
+      });
+
+    await revalidateCache([`${CACHE_TAGS.TICKETS}-${storeId}`, CACHE_TAGS.TICKETS, CACHE_TAGS.REPORTS]);
+    revalidatePath('/tickets');
+    revalidatePath(`/tickets/${ticketId}`);
+    revalidatePath('/dashboard');
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('Error force closing ticket:', error);
+    return { success: false, error: error.message || 'Failed to close ticket' };
   }
 }

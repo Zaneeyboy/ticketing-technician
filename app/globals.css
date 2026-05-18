@@ -8,6 +8,7 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
+  --font-heading: var(--font-playfair-display);
   --font-mono: var(--font-geist-mono);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -48,72 +49,95 @@
 }
 
 :root {
-  --radius: 0.5rem;
-  --card: oklch(0.99 0 0);
-  --card-foreground: oklch(0.18 0 0);
-  --popover: oklch(0.99 0 0);
-  --popover-foreground: oklch(0.18 0 0);
-  --primary: oklch(0.42 0.08 27);
-  --primary-foreground: oklch(0.98 0 0);
-  --secondary: oklch(0.62 0.13 40);
-  --secondary-foreground: oklch(0.18 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.48 0 0);
-  --accent: oklch(0.62 0.13 40);
-  --accent-foreground: oklch(0.18 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.93 0 0);
-  --input: oklch(0.98 0 0);
-  --ring: oklch(0.62 0.13 40);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.98 0 0);
-  --sidebar-foreground: oklch(0.18 0 0);
-  --sidebar-primary: oklch(0.42 0.08 27);
-  --sidebar-primary-foreground: oklch(0.98 0 0);
-  --sidebar-accent: oklch(0.62 0.13 40);
-  --sidebar-accent-foreground: oklch(0.18 0 0);
-  --sidebar-border: oklch(0.93 0 0);
-  --sidebar-ring: oklch(0.62 0.13 40);
-  --background: oklch(0.99 0 0);
-  --foreground: oklch(0.18 0 0);
+  --radius: 0.625rem;
+
+  /* Caribbean Roasters brand palette — #007CB5 blue, pure white, #161616 black */
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.11 0 0); /* #161616 — CR's near-black for maximum contrast */
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.11 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.11 0 0);
+
+  /* #007CB5 — Caribbean signature blue */
+  --primary: oklch(0.56 0.13 240);
+  --primary-foreground: oklch(1 0 0);
+
+  /* Light neutral secondary — for secondary buttons and subtle backgrounds */
+  --secondary: oklch(0.94 0.005 240);
+  --secondary-foreground: oklch(0.11 0 0);
+
+  /* #DBEDF8 — very light blue (section highlights, info backgrounds) */
+  --accent: oklch(0.94 0.025 230);
+  --accent-foreground: oklch(0.17 0.01 240);
+
+  --muted: oklch(0.97 0 0); /* #f6f6f6 */
+  --muted-foreground: oklch(0.4 0 0); /* #555 — darker secondary text like CR's #333 body */
+  --destructive: oklch(0.57 0.19 22); /* CR error #F83A3A */
+
+  --border: oklch(0.88 0 0);
+  --input: oklch(0.96 0 0);
+  --ring: oklch(0.56 0.13 240);
+
+  /* Chart palette — blue family */
+  --chart-1: oklch(0.56 0.13 240);
+  --chart-2: oklch(0.45 0.11 240);
+  --chart-3: oklch(0.68 0.1 240);
+  --chart-4: oklch(0.78 0.07 235);
+  --chart-5: oklch(0.36 0.13 240);
+
+  /* Dark navy sidebar — matches CR's dark footer #2B3033 */
+  --sidebar: oklch(0.17 0.01 240);
+  --sidebar-foreground: oklch(0.93 0 0);
+  --sidebar-primary: oklch(0.56 0.13 240);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.23 0.01 240);
+  --sidebar-accent-foreground: oklch(0.93 0 0);
+  --sidebar-border: oklch(0.28 0.01 240);
+  --sidebar-ring: oklch(0.56 0.13 240);
 }
 
 .dark {
-  --background: oklch(0.11 0 0);
-  --foreground: oklch(0.97 0 0);
-  --card: oklch(0.16 0 0);
-  --card-foreground: oklch(0.97 0 0);
-  --popover: oklch(0.16 0 0);
-  --popover-foreground: oklch(0.97 0 0);
-  --primary: oklch(0.68 0.1 40);
-  --primary-foreground: oklch(0.11 0 0);
-  --secondary: oklch(0.28 0 0);
-  --secondary-foreground: oklch(0.97 0 0);
-  --muted: oklch(0.28 0 0);
-  --muted-foreground: oklch(0.65 0 0);
-  --accent: oklch(0.68 0.1 40);
-  --accent-foreground: oklch(0.11 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 15%);
-  --input: oklch(1 0 0 / 20%);
-  --ring: oklch(0.65 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.16 0 0);
-  --sidebar-foreground: oklch(0.97 0 0);
-  --sidebar-primary: oklch(0.68 0.1 40);
-  --sidebar-primary-foreground: oklch(0.97 0 0);
-  --sidebar-accent: oklch(0.28 0 0);
-  --sidebar-accent-foreground: oklch(0.97 0 0);
-  --sidebar-border: oklch(1 0 0 / 15%);
-  --sidebar-ring: oklch(0.65 0 0);
+  --background: oklch(0.15 0.012 240);
+  --foreground: oklch(0.93 0 0);
+
+  --card: oklch(0.2 0.012 240);
+  --card-foreground: oklch(0.93 0 0);
+  --popover: oklch(0.2 0.012 240);
+  --popover-foreground: oklch(0.93 0 0);
+
+  --primary: oklch(0.62 0.13 240);
+  --primary-foreground: oklch(1 0 0);
+
+  --secondary: oklch(0.28 0.012 240);
+  --secondary-foreground: oklch(0.93 0 0);
+
+  --accent: oklch(0.26 0.04 235);
+  --accent-foreground: oklch(0.85 0.04 230);
+
+  --muted: oklch(0.23 0.012 240);
+  --muted-foreground: oklch(0.62 0 0);
+  --destructive: oklch(0.64 0.19 22);
+
+  --border: oklch(0.32 0.012 240);
+  --input: oklch(0.28 0.012 240);
+  --ring: oklch(0.62 0.13 240);
+
+  --chart-1: oklch(0.64 0.13 240);
+  --chart-2: oklch(0.52 0.11 240);
+  --chart-3: oklch(0.75 0.09 235);
+  --chart-4: oklch(0.82 0.06 230);
+  --chart-5: oklch(0.44 0.13 240);
+
+  --sidebar: oklch(0.12 0.012 240);
+  --sidebar-foreground: oklch(0.93 0 0);
+  --sidebar-primary: oklch(0.62 0.13 240);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.2 0.012 240);
+  --sidebar-accent-foreground: oklch(0.93 0 0);
+  --sidebar-border: oklch(0.26 0.012 240);
+  --sidebar-ring: oklch(0.62 0.13 240);
 }
 
 @layer base {
@@ -125,6 +149,17 @@
   }
   body {
     @apply bg-background text-foreground;
+    min-height: 100vh;
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-heading), sans-serif;
+    letter-spacing: -0.02em; /* CR uses tight letter-spacing on all headings */
+    font-weight: 700;
   }
   a,
   button,
@@ -330,28 +365,30 @@
   }
 }
 
+/* ─── Existing animation classes — add fill-mode so elements stay in final state ─── */
+
 .animate-fade-in {
-  animation: fade-in 280ms ease-out;
+  animation: fade-in 280ms ease-out both;
 }
 
 .animate-scale-in {
-  animation: scale-in 220ms ease-out;
+  animation: scale-in 220ms ease-out both;
 }
 
 .animate-slide-in-left {
-  animation: slide-in-left 400ms ease-out;
+  animation: slide-in-left 400ms ease-out both;
 }
 
 .animate-slide-in-right {
-  animation: slide-in-right 400ms ease-out;
+  animation: slide-in-right 400ms ease-out both;
 }
 
 .animate-slide-in-up {
-  animation: slide-in-up 400ms ease-out;
+  animation: slide-in-up 400ms ease-out both;
 }
 
 .animate-slide-in-down {
-  animation: slide-in-down 400ms ease-out;
+  animation: slide-in-down 400ms ease-out both;
 }
 
 .animate-float {
@@ -374,11 +411,11 @@
 }
 
 .animate-bounce-in {
-  animation: bounce-in 600ms cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  animation: bounce-in 600ms cubic-bezier(0.68, -0.55, 0.265, 1.55) both;
 }
 
 .animate-flip-in {
-  animation: flip-in 500ms ease-out;
+  animation: flip-in 500ms ease-out both;
 }
 
 .animate-glow-pulse {
@@ -393,32 +430,134 @@
   animation: slide-out-left 400ms ease-out forwards;
 }
 
+.animate-slide-out-right {
+  animation: slide-out-right 250ms ease-out forwards;
+}
+
 .animate-overlay-fade-in {
-  animation: overlay-fade-in 400ms ease-out forwards;
+  animation: overlay-fade-in 200ms ease-out forwards;
 }
 
 .animate-fade-out {
-  animation: fade-out 400ms ease-out forwards;
+  animation: fade-out 250ms ease-out forwards;
+}
+
+/* ─── Page transition — used by app/template.tsx and app/(protected)/template.tsx ─── */
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes page-enter-fast {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Right-to-left slide for mobile drawer close */
+@keyframes slide-out-right {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+
+/* Card stagger: children inside a .stagger-container get progressive delays */
+@keyframes card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-page-enter {
+  animation: page-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-page-enter-fast {
+  animation: page-enter-fast 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-card-enter {
+  animation: card-enter 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Stagger children of a card grid */
+.stagger-children > *:nth-child(1) {
+  animation-delay: 40ms;
+}
+.stagger-children > *:nth-child(2) {
+  animation-delay: 80ms;
+}
+.stagger-children > *:nth-child(3) {
+  animation-delay: 120ms;
+}
+.stagger-children > *:nth-child(4) {
+  animation-delay: 160ms;
+}
+.stagger-children > *:nth-child(5) {
+  animation-delay: 200ms;
+}
+.stagger-children > *:nth-child(6) {
+  animation-delay: 240ms;
+}
+.stagger-children > *:nth-child(7) {
+  animation-delay: 280ms;
+}
+.stagger-children > *:nth-child(8) {
+  animation-delay: 320ms;
+}
+.stagger-children > *:nth-child(9) {
+  animation-delay: 360ms;
+}
+.stagger-children > *:nth-child(10) {
+  animation-delay: 400ms;
+}
+.stagger-children > *:nth-child(11) {
+  animation-delay: 440ms;
+}
+.stagger-children > *:nth-child(12) {
+  animation-delay: 480ms;
 }
 
 /* Stagger animation delays */
 .stagger-1 {
-  animation-delay: 100ms;
+  animation-delay: 80ms;
 }
 .stagger-2 {
-  animation-delay: 200ms;
+  animation-delay: 160ms;
 }
 .stagger-3 {
-  animation-delay: 300ms;
+  animation-delay: 240ms;
 }
 .stagger-4 {
-  animation-delay: 400ms;
+  animation-delay: 320ms;
 }
 .stagger-5 {
-  animation-delay: 500ms;
+  animation-delay: 400ms;
 }
 .stagger-6 {
-  animation-delay: 600ms;
+  animation-delay: 480ms;
 }
 
 /* Smooth transitions for interactive elements */
@@ -443,8 +582,20 @@
   .animate-gradient-shift,
   .animate-bounce-in,
   .animate-flip-in,
-  .animate-glow-pulse {
+  .animate-glow-pulse,
+  .animate-page-enter,
+  .animate-page-enter-fast,
+  .animate-card-enter,
+  .stagger-children > * {
     animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .animate-card-enter:hover,
+  .card-hover:hover {
+    transform: none;
+    box-shadow: none;
   }
 
   *,
@@ -602,4 +753,73 @@
 
 [data-sonner-toast] [data-close-button]:hover {
   opacity: 0.7;
+}
+
+/* ─── Interactive utility classes ──────────────────────────────────────────── */
+
+/* Stat card hover lift — automatically applied to any card with animate-card-enter */
+.animate-card-enter {
+  transition:
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.animate-card-enter:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    0 10px 28px -6px rgba(0, 0, 0, 0.12),
+    0 4px 8px -2px rgba(0, 0, 0, 0.06);
+}
+.dark .animate-card-enter:hover {
+  box-shadow:
+    0 10px 28px -6px rgba(0, 0, 0, 0.45),
+    0 4px 8px -2px rgba(0, 0, 0, 0.25);
+}
+
+/* Icon wrapper inside stat cards — subtle rotate-and-scale on parent hover */
+.animate-card-enter .card-icon {
+  transition: transform 250ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.animate-card-enter:hover .card-icon {
+  transform: scale(1.12) rotate(-5deg);
+}
+
+/* Data table body row hover */
+tbody tr {
+  transition: background-color 120ms ease-out;
+}
+tbody tr:hover {
+  background-color: color-mix(in oklch, var(--accent) 50%, transparent);
+}
+
+/* Card hover lift utility (manual opt-in) */
+.card-hover {
+  transition:
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.card-hover:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    0 8px 24px -4px rgba(0, 0, 0, 0.12),
+    0 4px 8px -2px rgba(0, 0, 0, 0.06);
+}
+.dark .card-hover:hover {
+  box-shadow:
+    0 8px 24px -4px rgba(0, 0, 0, 0.4),
+    0 4px 8px -2px rgba(0, 0, 0, 0.2);
+}
+
+/* Soft shimmer on skeleton rows */
+@keyframes skeleton-wave {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}
+.skeleton-wave {
+  background: linear-gradient(90deg, var(--muted) 25%, var(--accent) 50%, var(--muted) 75%);
+  background-size: 800px 100%;
+  animation: skeleton-wave 1.6s ease-in-out infinite;
 }

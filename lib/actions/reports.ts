@@ -1,4 +1,4 @@
-'use server';
+﻿'use server';
 
 import { adminDb } from '@/lib/firebase/admin';
 import { getCurrentUser } from '@/lib/auth/session';
@@ -77,7 +77,7 @@ export async function getTechnicianMetrics(): Promise<TechnicianMetrics[]> {
   const cachedFn = unstable_cache(
     async () => {
       const user = await getCurrentUser();
-      if (!user || !['admin', 'management'].includes(user.role)) {
+      if (!user || !['store_admin', 'super_admin'].includes(user.role)) {
         return [];
       }
 
@@ -161,7 +161,7 @@ export async function getTicketMetrics(): Promise<TicketMetrics> {
       const user = await getCurrentUser();
       console.log('[getTicketMetrics] User:', user ? { email: user.email, role: user.role } : 'NULL');
 
-      if (!user || !['admin', 'management'].includes(user.role)) {
+      if (!user || !['store_admin', 'super_admin'].includes(user.role)) {
         console.log('[getTicketMetrics] Access denied - user role:', user?.role);
         return {
           totalTickets: 0,
@@ -264,7 +264,7 @@ export async function getCustomerMetrics(): Promise<CustomerMetrics[]> {
   const cachedFn = unstable_cache(
     async () => {
       const user = await getCurrentUser();
-      if (!user || !['admin', 'management'].includes(user.role)) {
+      if (!user || !['store_admin', 'super_admin'].includes(user.role)) {
         return [];
       }
 
@@ -372,7 +372,7 @@ export async function getEquipmentMetrics(): Promise<EquipmentMetrics[]> {
   const cachedFn = unstable_cache(
     async () => {
       const user = await getCurrentUser();
-      if (!user || !['admin', 'management'].includes(user.role)) {
+      if (!user || !['store_admin', 'super_admin'].includes(user.role)) {
         return [];
       }
 
@@ -465,7 +465,7 @@ export async function getRevenueMetrics(): Promise<RevenueMetrics[]> {
   const cachedFn = unstable_cache(
     async () => {
       const user = await getCurrentUser();
-      if (!user || !['admin', 'management'].includes(user.role)) {
+      if (!user || !['store_admin', 'super_admin'].includes(user.role)) {
         return [];
       }
 
@@ -540,7 +540,7 @@ export async function getServiceQualityMetrics(): Promise<ServiceQualityMetrics>
   const cachedFn = unstable_cache(
     async () => {
       const user = await getCurrentUser();
-      if (!user || !['admin', 'management'].includes(user.role)) {
+      if (!user || !['store_admin', 'super_admin'].includes(user.role)) {
         return {
           totalTickets: 0,
           closedTickets: 0,

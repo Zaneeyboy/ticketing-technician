@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/lib/auth/auth-provider';
+import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/dashboard-layout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -16,8 +17,14 @@ import { CreateTicketModal } from './create-ticket-modal';
 import { EditTicketModal } from './edit-ticket-modal';
 import { ViewTicketModal } from './view-ticket-modal';
 import { LogWorkModal } from './log-work-modal';
+import { ShareTicketDialog } from '@/components/share-ticket-dialog';
 import { getCustomersForTickets, getTechniciansForAssignment, CustomerForTicket, TechnicianForTicket } from '@/lib/actions/tickets';
-import { Plus, ArrowUpDown, ChevronsUpDown } from 'lucide-react';
+import { Plus, ArrowUpDown, ChevronsUpDown, ClipboardList, CheckCircle2, AlertTriangle, UserCheck as UserCheckIcon, Share2, Wrench, Pencil } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { cn } from '@/lib/utils';
+import { PageHeader } from '@/components/page-header';
+import { DateRangeExportButton } from '@/components/export-button';
+import { type ExportColumn } from '@/lib/export';
 import { formatDate } from '@/lib/utils';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { TableSkeleton } from '@/components/skeletons/table-skeleton';
@@ -37,11 +44,13 @@ import {
 
 export default function TicketsPage() {
   const { user } = useAuth();
+  const router = useRouter();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [technicians, setTechnicians] = useState<any[]>([]);
   const [preloadedCustomers, setPreloadedCustomers] = useState<CustomerForTicket[]>([]);
   const [preloadedTechnicians, setPreloadedTechnicians] = useState<TechnicianForTicket[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [globalFilter, setGlobalFilter] = useState('');
   const debouncedGlobalFilter = useDebounce(globalFilter, 300);
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -57,6 +66,8 @@ export default function TicketsPage() {
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [logWorkModalOpen, setLogWorkModalOpen] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareTicket, setShareTicket] = useState<Ticket | null>(null);
 
   useEffect(() => {
     if (user?.uid) {
@@ -99,27 +110,34 @@ export default function TicketsPage() {
 
   const loadTickets = async () => {
     setLoading(true);
+    setLoadError(null);
     const timeoutId = setTimeout(() => {
       console.warn('[TicketsPage] Loading timeout reached after 10 seconds');
       setLoading(false);
     }, 10000); // 10 second timeout
 
     try {
-      const ticketsRef = collection(db, 'tickets');
+      // Use per-store subcollection path — flat 'tickets' collection is legacy
+      const storeId = user?.storeId;
+      if (!storeId) {
+        console.warn('[TicketsPage] No storeId on user — cannot load tickets');
+        clearTimeout(timeoutId);
+        setTickets([]);
+        setLoading(false);
+        return;
+      }
+
+      const ticketsRef = collection(db, 'stores', storeId, 'tickets');
       let q;
 
       if (user?.role === 'technician') {
         // For technicians, only load tickets assigned to them
         q = query(ticketsRef, where('assignedTo', '==', user.uid), orderBy('createdAt', 'desc'));
         console.log('[TicketsPage] Loading technician tickets for user:', user.uid);
-      } else if (user?.role === 'call_admin') {
-        // For call admins, only load tickets they created
-        q = query(ticketsRef, where('createdBy', '==', user.uid), orderBy('createdAt', 'desc'));
-        console.log('[TicketsPage] Loading call_admin tickets created by user:', user.uid);
       } else {
-        // For admin/management, load all tickets
+        // store_admin, store_manager, call_admin — all store tickets
         q = query(ticketsRef, orderBy('createdAt', 'desc'));
-        console.log('[TicketsPage] Loading all tickets (admin/management)');
+        console.log('[TicketsPage] Loading all tickets for role:', user?.role);
       }
 
       const snapshot = await getDocs(q);
@@ -138,10 +156,12 @@ export default function TicketsPage() {
     } catch (error: any) {
       console.error('[TicketsPage] Error loading tickets with query:', error);
 
-      // Fallback: Load all tickets and filter client-side
+      // Fallback: Load all tickets from store and filter client-side
       console.log('[TicketsPage] Attempting fallback: loading all tickets and filtering client-side');
       try {
-        const allTicketsSnapshot = await getDocs(collection(db, 'tickets'));
+        const storeId = user?.storeId;
+        const fallbackRef = storeId ? collection(db, 'stores', storeId, 'tickets') : collection(db, 'tickets');
+        const allTicketsSnapshot = await getDocs(fallbackRef);
         const allTickets = allTicketsSnapshot.docs.map(
           (doc) =>
             ({
@@ -157,9 +177,6 @@ export default function TicketsPage() {
         if (user?.role === 'technician') {
           filteredTickets = allTickets.filter((ticket) => ticket.assignedTo === user.uid);
           console.log(`[TicketsPage] Filtered to ${filteredTickets.length} tickets assigned to technician`);
-        } else if (user?.role === 'call_admin') {
-          filteredTickets = allTickets.filter((ticket) => ticket.createdBy === user.uid);
-          console.log(`[TicketsPage] Filtered to ${filteredTickets.length} tickets created by call_admin`);
         }
 
         // Sort by creation date
@@ -176,6 +193,7 @@ export default function TicketsPage() {
       } catch (fallbackError: any) {
         console.error('[TicketsPage] Fallback loading also failed:', fallbackError);
         clearTimeout(timeoutId);
+        setLoadError('Failed to load tickets. Check your connection and try again.');
         setTickets([]);
         setLoading(false);
       }
@@ -185,28 +203,28 @@ export default function TicketsPage() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'Open':
-        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200';
+        return 'bg-amber-500/15 text-amber-700 dark:text-amber-400';
       case 'Assigned':
-        return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
+        return 'bg-primary/10 text-primary dark:bg-primary/15';
       case 'Closed':
-        return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
+        return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400';
       default:
-        return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
+        return 'bg-muted text-muted-foreground';
     }
   };
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
       case 'Low':
-        return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
+        return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400';
       case 'Medium':
-        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200';
+        return 'bg-amber-500/15 text-amber-700 dark:text-amber-400';
       case 'High':
-        return 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200';
+        return 'bg-orange-500/15 text-orange-700 dark:text-orange-400';
       case 'Urgent':
-        return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200';
+        return 'bg-red-500/15 text-red-700 dark:text-red-400';
       default:
-        return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
+        return 'bg-muted text-muted-foreground';
     }
   };
 
@@ -225,6 +243,11 @@ export default function TicketsPage() {
     setLogWorkModalOpen(true);
   };
 
+  const handleShareTicket = (ticket: Ticket) => {
+    setShareTicket(ticket);
+    setShareDialogOpen(true);
+  };
+
   // Filter tickets based on status and technician
   const filteredByStatus = useMemo(() => {
     let filtered = tickets;
@@ -232,10 +255,26 @@ export default function TicketsPage() {
       filtered = filtered.filter((ticket) => ticket.status === statusFilter);
     }
     if (technicianFilter !== 'all') {
-      filtered = filtered.filter((ticket) => ticket.assignedTo === technicianFilter);
+      filtered = technicianFilter === 'unassigned' ? filtered.filter((ticket) => !ticket.assignedTo) : filtered.filter((ticket) => ticket.assignedTo === technicianFilter);
     }
     return filtered;
   }, [tickets, statusFilter, technicianFilter]);
+
+  const ticketStats = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const toDateVal = (v: any): Date | null => v?.toDate?.() ?? (v ? new Date(v) : null);
+    return {
+      open: tickets.filter((t) => t.status === 'Open').length,
+      assigned: tickets.filter((t) => t.status === 'Assigned').length,
+      unassigned: tickets.filter((t) => t.status === 'Open' && !t.assignedTo).length,
+      closedToday: tickets.filter((t) => {
+        if (t.status !== 'Closed') return false;
+        const d = toDateVal((t as any).closedAt);
+        return d ? d >= today : false;
+      }).length,
+    };
+  }, [tickets]);
 
   // Column definitions
   const columns: ColumnDef<Ticket>[] = useMemo(
@@ -243,19 +282,23 @@ export default function TicketsPage() {
       {
         accessorKey: 'ticketNumber',
         header: ({ column }) => (
-          <button onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')} className='flex items-center gap-1 hover:text-blue-600'>
+          <button onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')} className='flex items-center gap-1 hover:text-primary'>
             Ticket #
             <ArrowUpDown className='h-4 w-4' />
           </button>
         ),
-        cell: ({ row }) => <span className='font-medium'>{row.getValue('ticketNumber')}</span>,
+        cell: ({ row }) => (
+          <button onClick={() => router.push(`/tickets/${row.original.id}`)} className='font-medium text-primary hover:underline'>
+            {row.getValue('ticketNumber')}
+          </button>
+        ),
         enableSorting: true,
       },
       {
         id: 'customerName',
         accessorFn: (row) => row.machines?.[0]?.customerName || '',
         header: ({ column }) => (
-          <button onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')} className='flex items-center gap-1 hover:text-blue-600'>
+          <button onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')} className='flex items-center gap-1 hover:text-primary'>
             Customer
             <ArrowUpDown className='h-4 w-4' />
           </button>
@@ -294,7 +337,7 @@ export default function TicketsPage() {
       {
         accessorKey: 'status',
         header: ({ column }) => (
-          <button onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')} className='flex items-center gap-1 hover:text-blue-600'>
+          <button onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')} className='flex items-center gap-1 hover:text-primary'>
             Status
             <ArrowUpDown className='h-4 w-4' />
           </button>
@@ -309,7 +352,7 @@ export default function TicketsPage() {
       {
         accessorKey: 'priority',
         header: ({ column }) => (
-          <button onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')} className='flex items-center gap-1 hover:text-blue-600'>
+          <button onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')} className='flex items-center gap-1 hover:text-primary'>
             Priority
             <ArrowUpDown className='h-4 w-4' />
           </button>
@@ -327,7 +370,7 @@ export default function TicketsPage() {
       {
         accessorKey: 'assignedToName',
         header: ({ column }) => (
-          <button onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')} className='flex items-center gap-1 hover:text-blue-600'>
+          <button onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')} className='flex items-center gap-1 hover:text-primary'>
             Assigned To
             <ArrowUpDown className='h-4 w-4' />
           </button>
@@ -341,7 +384,7 @@ export default function TicketsPage() {
       {
         accessorKey: 'scheduledVisitDate',
         header: ({ column }) => (
-          <button onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')} className='flex items-center gap-1 hover:text-blue-600'>
+          <button onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')} className='flex items-center gap-1 hover:text-primary'>
             Scheduled Visit
             <ArrowUpDown className='h-4 w-4' />
           </button>
@@ -366,7 +409,7 @@ export default function TicketsPage() {
       {
         accessorKey: 'createdAt',
         header: ({ column }) => (
-          <button onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')} className='flex items-center gap-1 hover:text-blue-600'>
+          <button onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')} className='flex items-center gap-1 hover:text-primary'>
             Created
             <ArrowUpDown className='h-4 w-4' />
           </button>
@@ -388,34 +431,36 @@ export default function TicketsPage() {
 
           return (
             <div className='flex gap-2'>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant='ghost' size='sm' onClick={() => handleViewTicket(ticket)}>
-                    View
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>View ticket details</TooltipContent>
-              </Tooltip>
               {isAssignedTechnic && ticket.status !== 'Closed' && (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant='ghost' size='sm' onClick={() => handleLogWork(ticket)} className='text-blue-600 hover:text-blue-700'>
-                      Log Work
+                    <Button variant='ghost' size='sm' onClick={() => handleLogWork(ticket)} className='gap-1.5 text-blue-600 hover:text-blue-700'>
+                      <Wrench className='h-4 w-4 shrink-0' />
+                      <span className='hidden sm:inline'>Log Work</span>
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>Log work performed on this ticket</TooltipContent>
                 </Tooltip>
               )}
-              {(user?.role === 'admin' || user?.role === 'call_admin' || user?.role === 'management') && (
+              {(user?.role === 'store_admin' || user?.role === 'super_admin' || user?.role === 'call_admin' || user?.role === 'store_manager') && (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant='ghost' size='sm' onClick={() => handleEditTicket(ticket)}>
-                      Edit
+                    <Button variant='ghost' size='sm' onClick={() => handleEditTicket(ticket)} className='gap-1.5'>
+                      <Pencil className='h-4 w-4 shrink-0' />
+                      <span className='hidden sm:inline'>Edit</span>
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>Edit ticket</TooltipContent>
                 </Tooltip>
               )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant='ghost' size='icon' className='h-8 w-8 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 hover:text-primary' onClick={() => handleShareTicket(ticket)}>
+                    <Share2 className='h-3.5 w-3.5' />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Share ticket via WhatsApp or Email</TooltipContent>
+              </Tooltip>
             </div>
           );
         },
@@ -431,7 +476,7 @@ export default function TicketsPage() {
     state: {
       sorting,
       columnFilters,
-      globalFilter,
+      globalFilter: debouncedGlobalFilter,
       pagination,
     },
     enableGlobalFilter: true,
@@ -455,143 +500,227 @@ export default function TicketsPage() {
   return (
     <DashboardLayout>
       <div className='space-y-6'>
-        <div className='flex justify-between items-center'>
-          <div>
-            <h2 className='text-2xl font-bold'>Tickets</h2>
-            <p className='text-slate-600 dark:text-slate-400'>Manage service tickets and assignments</p>
-          </div>
-          {(user.role === 'admin' || user.role === 'call_admin' || user.role === 'management') && (
-            <Button onClick={() => setCreateModalOpen(true)} className='gap-2'>
-              <Plus className='h-4 w-4' />
-              Create Ticket
-            </Button>
-          )}
-        </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>All Tickets</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className='space-y-4'>
-              {/* Debug info - temporary */}
-              <div className='text-xs text-slate-500 bg-slate-50 dark:bg-slate-900 p-2 rounded border border-slate-200 dark:border-slate-700'>
-                Loading: {loading.toString()} | Role: {user?.role} | Tickets: {tickets.length}
-              </div>
-
-              {/* Search and Filters */}
-              <div className='flex flex-col sm:flex-row gap-4'>
-                <Input placeholder='Search tickets by number, customer, machine, or issue...' value={globalFilter} onChange={(e) => setGlobalFilter(e.target.value)} className='flex-1' />
-                <div className='flex gap-2 flex-wrap'>
-                  <Button variant={statusFilter === 'all' ? 'default' : 'outline'} size='sm' onClick={() => setStatusFilter('all')}>
-                    All ({filteredByStatus.length})
-                  </Button>
-                  <Button variant={statusFilter === 'Open' ? 'default' : 'outline'} size='sm' onClick={() => setStatusFilter('Open')}>
-                    Open ({filteredByStatus.filter((t) => t.status === 'Open').length})
-                  </Button>
-                  <Button variant={statusFilter === 'Assigned' ? 'default' : 'outline'} size='sm' onClick={() => setStatusFilter('Assigned')}>
-                    Assigned ({filteredByStatus.filter((t) => t.status === 'Assigned').length})
-                  </Button>
-                  <Button variant={statusFilter === 'Closed' ? 'default' : 'outline'} size='sm' onClick={() => setStatusFilter('Closed')}>
-                    Closed ({filteredByStatus.filter((t) => t.status === 'Closed').length})
-                  </Button>
-                </div>
-                {/* Technician Filter */}
-                <div className='flex items-center gap-2'>
-                  <span className='text-xs font-medium text-slate-600'>Technician:</span>
-                  <select
-                    value={technicianFilter}
-                    onChange={(e) => setTechnicianFilter(e.target.value)}
-                    className='px-2 py-1 text-xs border rounded-md bg-white dark:bg-slate-900 dark:border-slate-700'
-                  >
-                    <option value='all'>All</option>
-                    <option value='unassigned'>Unassigned</option>
-                    {technicians.map((tech) => (
-                      <option key={tech.id} value={tech.id}>
-                        {tech.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {/* Technician Filter */}
-                <div className='flex items-center gap-2'>
-                  <span className='text-xs font-medium text-slate-600'>Technician:</span>
-                  <select
-                    value={technicianFilter}
-                    onChange={(e) => setTechnicianFilter(e.target.value)}
-                    className='px-2 py-1 text-xs border rounded-md bg-white dark:bg-slate-900 dark:border-slate-700'
-                  >
-                    <option value='all'>All</option>
-                    <option value='unassigned'>Unassigned</option>
-                    {technicians.map((tech) => (
-                      <option key={tech.id} value={tech.id}>
-                        {tech.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Table */}
-              {loading ? (
-                <div className='space-y-3'>
-                  <div className='flex items-center gap-2 mb-4'>
-                    <Skeleton className='h-9 w-32' />
-                    <Skeleton className='h-9 w-32' />
-                    <Skeleton className='h-9 w-32' />
-                  </div>
-                  <TableSkeleton rows={8} columns={8} showHeader />
-                </div>
-              ) : table.getRowModel().rows.length === 0 ? (
-                <div className='text-center py-8 text-slate-500'>No tickets found</div>
-              ) : (
-                <div className='border rounded-lg overflow-x-auto'>
-                  <Table>
-                    <TableHeader>
-                      {table.getHeaderGroups().map((headerGroup) => (
-                        <TableRow key={headerGroup.id}>
-                          {headerGroup.headers.map((header) => (
-                            <TableHead key={header.id}>{header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}</TableHead>
-                          ))}
-                        </TableRow>
-                      ))}
-                    </TableHeader>
-                    <TableBody>
-                      {table.getRowModel().rows.map((row) => (
-                        <TableRow key={row.id}>
-                          {row.getVisibleCells().map((cell) => (
-                            <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
-                          ))}
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-
-              {/* Pagination controls */}
-              {table.getPageCount() > 0 && (
-                <div className='flex items-center justify-between gap-4 mt-4'>
-                  <div className='text-sm text-slate-500'>
-                    Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount()} ({filteredByStatus.length} total tickets)
-                  </div>
-                  <div className='flex gap-2'>
-                    <Button variant='outline' size='sm' onClick={() => table.setPageIndex(0)} disabled={!table.getCanPreviousPage()}>
-                      First
-                    </Button>
-                    <Button variant='outline' size='sm' onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>
-                      Previous
-                    </Button>
-                    <Button variant='outline' size='sm' onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>
-                      Next
-                    </Button>
-                    <Button variant='outline' size='sm' onClick={() => table.setPageIndex(table.getPageCount() - 1)} disabled={!table.getCanNextPage()}>
-                      Last
-                    </Button>
-                  </div>
-                </div>
+        {/* Page Header */}
+        <PageHeader
+          title='Tickets'
+          description='Manage service requests and technician assignments'
+          icon={ClipboardList}
+          actions={
+            <div className='flex items-center gap-2'>
+              <DateRangeExportButton
+                allData={tickets as unknown as Record<string, any>[]}
+                filterFn={(data, from, to) =>
+                  data.filter((t) => {
+                    const d = t.createdAt instanceof Date ? t.createdAt : (t.createdAt as any)?.toDate?.();
+                    return d && d >= from && d <= to;
+                  })
+                }
+                columns={
+                  [
+                    { header: 'Ticket #', key: 'ticketNumber' },
+                    { header: 'Status', key: 'status' },
+                    {
+                      header: 'Customer',
+                      key: 'machines',
+                      formatter: (v) => v?.[0]?.customerName ?? '',
+                    },
+                    {
+                      header: 'Machine',
+                      key: 'machines',
+                      formatter: (v) => v?.[0]?.machineType ?? '',
+                    },
+                    { header: 'Assigned To', key: 'assignedToName', formatter: (v) => v ?? 'Unassigned' },
+                    {
+                      header: 'Created',
+                      key: 'createdAt',
+                      formatter: (v) => {
+                        const d = v instanceof Date ? v : v?.toDate?.();
+                        return d ? d.toLocaleDateString('en-TT') : '';
+                      },
+                    },
+                    {
+                      header: 'Closed',
+                      key: 'closedAt',
+                      formatter: (v) => {
+                        const d = v instanceof Date ? v : v?.toDate?.();
+                        return d ? d.toLocaleDateString('en-TT') : '';
+                      },
+                    },
+                  ] as ExportColumn[]
+                }
+                filename='tickets-export'
+                sheetName='Tickets'
+                title='Tickets'
+              />
+              {(user.role === 'store_admin' || user.role === 'super_admin' || user.role === 'call_admin') && (
+                <Button onClick={() => setCreateModalOpen(true)} className='gap-2'>
+                  <Plus className='h-4 w-4' />
+                  Create Ticket
+                </Button>
               )}
             </div>
+          }
+        />
+
+        {/* Stat cards — admin & manager only */}
+        {(user.role === 'store_admin' || user.role === 'store_manager') && (
+          <div className='grid grid-cols-2 lg:grid-cols-4 gap-4 stagger-children'>
+            <Card className='animate-card-enter border-t-4 border-t-primary/60 bg-linear-to-br from-primary/8 via-background to-background'>
+              <CardContent className='pt-4 sm:pt-5 px-3 sm:px-6 flex items-center gap-3'>
+                <div className='rounded-lg bg-primary/10 p-2.5'>
+                  <ClipboardList className='h-4 w-4 text-primary' />
+                </div>
+                <div>
+                  <p className='text-2xl font-bold'>{ticketStats.open}</p>
+                  <p className='text-xs text-muted-foreground'>Open</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className='animate-card-enter border-t-4 border-t-amber-500/60 bg-linear-to-br from-amber-500/8 via-background to-background'>
+              <CardContent className='pt-4 sm:pt-5 px-3 sm:px-6 flex items-center gap-3'>
+                <div className='rounded-lg bg-amber-500/10 p-2.5'>
+                  <UserCheckIcon className='h-4 w-4 text-amber-600' />
+                </div>
+                <div>
+                  <p className='text-2xl font-bold text-amber-700 dark:text-amber-400'>{ticketStats.assigned}</p>
+                  <p className='text-xs text-muted-foreground'>Assigned</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className='animate-card-enter border-t-4 border-t-destructive/60 bg-linear-to-br from-destructive/8 via-background to-background'>
+              <CardContent className='pt-4 sm:pt-5 px-3 sm:px-6 flex items-center gap-3'>
+                <div className='rounded-lg bg-destructive/10 p-2.5'>
+                  <AlertTriangle className='h-4 w-4 text-destructive' />
+                </div>
+                <div>
+                  <p className='text-2xl font-bold text-destructive'>{ticketStats.unassigned}</p>
+                  <p className='text-xs text-muted-foreground'>Unassigned</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className='animate-card-enter border-t-4 border-t-green-500/60 bg-linear-to-br from-green-500/8 via-background to-background'>
+              <CardContent className='pt-4 sm:pt-5 px-3 sm:px-6 flex items-center gap-3'>
+                <div className='rounded-lg bg-green-500/10 p-2.5'>
+                  <CheckCircle2 className='h-4 w-4 text-green-600' />
+                </div>
+                <div>
+                  <p className='text-2xl font-bold text-green-700 dark:text-green-400'>{ticketStats.closedToday}</p>
+                  <p className='text-xs text-muted-foreground'>Closed Today</p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Main table card */}
+        <Card className='animate-fade-in stagger-3'>
+          <CardHeader className='border-b pb-4 space-y-3'>
+            <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+              <div>
+                <CardTitle className='text-base'>All Tickets</CardTitle>
+                <p className='text-sm text-muted-foreground mt-0.5'>
+                  {filteredByStatus.length} result{filteredByStatus.length !== 1 ? 's' : ''}
+                </p>
+              </div>
+              <Input placeholder='Search by number, customer, machine, or issue...' value={globalFilter} onChange={(e) => setGlobalFilter(e.target.value)} className='sm:max-w-xs' />
+            </div>
+            <div className='flex flex-wrap items-center gap-2'>
+              {(['all', 'Open', 'Assigned', 'Closed'] as const).map((s) => {
+                const count = s === 'all' ? tickets.length : tickets.filter((t) => t.status === s).length;
+                return (
+                  <button
+                    key={s}
+                    onClick={() => setStatusFilter(s)}
+                    className={cn(
+                      'rounded-full px-3 py-1 text-xs font-medium transition-all duration-200',
+                      statusFilter === s ? 'bg-primary text-primary-foreground shadow-sm' : 'bg-muted text-muted-foreground hover:bg-muted/70',
+                    )}
+                  >
+                    {s === 'all' ? 'All' : s} · {count}
+                  </button>
+                );
+              })}
+              {(user.role === 'store_admin' || user.role === 'store_manager') && (
+                <Select value={technicianFilter} onValueChange={setTechnicianFilter}>
+                  <SelectTrigger className='h-7 w-40 text-xs rounded-full'>
+                    <SelectValue placeholder='All technicians' />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value='all'>All Technicians</SelectItem>
+                    <SelectItem value='unassigned'>Unassigned</SelectItem>
+                    {technicians.map((tech) => (
+                      <SelectItem key={tech.id} value={tech.id}>
+                        {tech.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className='pt-4'>
+            {loadError && (
+              <div className='flex items-center justify-between gap-4 mb-4 p-4 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-800 text-red-800 dark:text-red-200'>
+                <p className='text-sm font-medium'>{loadError}</p>
+                <Button size='sm' variant='outline' onClick={() => loadTickets()} className='shrink-0 border-red-300 dark:border-red-700'>
+                  Retry
+                </Button>
+              </div>
+            )}
+            {loading ? (
+              <TableSkeleton rows={8} columns={8} showHeader />
+            ) : table.getRowModel().rows.length === 0 ? (
+              <div className='flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground'>
+                <ClipboardList className='h-10 w-10 opacity-30' />
+                <p className='text-sm font-medium'>No tickets found</p>
+                <p className='text-xs opacity-70'>Try adjusting your search or filters</p>
+              </div>
+            ) : (
+              <div className='border rounded-lg overflow-x-auto'>
+                <Table>
+                  <TableHeader>
+                    {table.getHeaderGroups().map((headerGroup) => (
+                      <TableRow key={headerGroup.id}>
+                        {headerGroup.headers.map((header) => (
+                          <TableHead key={header.id}>{header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}</TableHead>
+                        ))}
+                      </TableRow>
+                    ))}
+                  </TableHeader>
+                  <TableBody>
+                    {table.getRowModel().rows.map((row) => (
+                      <TableRow key={row.id}>
+                        {row.getVisibleCells().map((cell) => (
+                          <TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>
+                        ))}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+
+            {table.getPageCount() > 0 && (
+              <div className='flex items-center justify-between gap-4 mt-4'>
+                <p className='text-sm text-muted-foreground'>
+                  Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount()} · {filteredByStatus.length} ticket{filteredByStatus.length !== 1 ? 's' : ''}
+                </p>
+                <div className='flex gap-2'>
+                  <Button variant='outline' size='sm' onClick={() => table.setPageIndex(0)} disabled={!table.getCanPreviousPage()} className='hidden sm:inline-flex'>
+                    First
+                  </Button>
+                  <Button variant='outline' size='sm' onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>
+                    Prev
+                  </Button>
+                  <Button variant='outline' size='sm' onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>
+                    Next
+                  </Button>
+                  <Button variant='outline' size='sm' onClick={() => table.setPageIndex(table.getPageCount() - 1)} disabled={!table.getCanNextPage()} className='hidden sm:inline-flex'>
+                    Last
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -611,6 +740,7 @@ export default function TicketsPage() {
           }}
         />
       )}
+      <ShareTicketDialog open={shareDialogOpen} onOpenChange={setShareDialogOpen} ticketData={shareTicket} />
     </DashboardLayout>
   );
 }

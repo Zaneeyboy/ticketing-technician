@@ -21,7 +21,7 @@ export function TechnicianPerformanceReport({ data }: TechnicianPerformanceRepor
       <div className='grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4'>
         <Card>
           <CardHeader className='pb-1 sm:pb-2'>
-            <CardTitle className='text-xs sm:text-sm font-medium text-gray-600'>Assigned</CardTitle>
+            <CardTitle className='text-xs sm:text-sm font-medium text-muted-foreground'>Assigned</CardTitle>
           </CardHeader>
           <CardContent>
             <div className='text-xl sm:text-2xl font-bold'>{totalAssigned}</div>
@@ -30,7 +30,7 @@ export function TechnicianPerformanceReport({ data }: TechnicianPerformanceRepor
 
         <Card>
           <CardHeader className='pb-1 sm:pb-2'>
-            <CardTitle className='text-xs sm:text-sm font-medium text-gray-600'>Closed</CardTitle>
+            <CardTitle className='text-xs sm:text-sm font-medium text-muted-foreground'>Closed</CardTitle>
           </CardHeader>
           <CardContent>
             <div className='text-xl sm:text-2xl font-bold text-green-600'>{totalClosed}</div>
@@ -39,7 +39,7 @@ export function TechnicianPerformanceReport({ data }: TechnicianPerformanceRepor
 
         <Card>
           <CardHeader className='pb-1 sm:pb-2'>
-            <CardTitle className='text-xs sm:text-sm font-medium text-gray-600'>Avg Resolution</CardTitle>
+            <CardTitle className='text-xs sm:text-sm font-medium text-muted-foreground'>Avg Resolution</CardTitle>
           </CardHeader>
           <CardContent>
             <div className='text-xl sm:text-2xl font-bold'>{avgResolution}h</div>
@@ -48,11 +48,11 @@ export function TechnicianPerformanceReport({ data }: TechnicianPerformanceRepor
 
         <Card>
           <CardHeader className='pb-1 sm:pb-2'>
-            <CardTitle className='text-xs sm:text-sm font-medium text-gray-600'>Top Performer</CardTitle>
+            <CardTitle className='text-xs sm:text-sm font-medium text-muted-foreground'>Top Performer</CardTitle>
           </CardHeader>
           <CardContent>
             <div className='text-xs sm:text-sm font-semibold truncate'>{data[0]?.name || 'N/A'}</div>
-            <div className='text-xs text-gray-500'>{data[0]?.totalClosed || 0} closed</div>
+            <div className='text-xs text-muted-foreground'>{data[0]?.totalClosed || 0} closed</div>
           </CardContent>
         </Card>
       </div>
@@ -91,12 +91,12 @@ export function TechnicianPerformanceReport({ data }: TechnicianPerformanceRepor
                         </Badge>
                       </TableCell>
                       <TableCell className='hidden sm:table-cell text-right text-xs sm:text-sm'>
-                        <Badge variant='outline' className={`text-xs ${tech.openCount > 0 ? 'bg-yellow-50 text-yellow-700' : 'bg-gray-50'}`}>
+                        <Badge variant='outline' className={`text-xs ${tech.openCount > 0 ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
                           {tech.openCount}
                         </Badge>
                       </TableCell>
                       <TableCell className='text-right text-xs sm:text-sm'>
-                        <Badge className={`text-xs ${closureRate >= 80 ? 'bg-green-600' : closureRate >= 60 ? 'bg-yellow-600' : 'bg-orange-600'}`}>{closureRate}%</Badge>
+                        <Badge className={`text-xs ${closureRate >= 80 ? 'bg-secondary' : closureRate >= 60 ? 'bg-primary' : 'bg-destructive'}`}>{closureRate}%</Badge>
                       </TableCell>
                       <TableCell className='hidden lg:table-cell text-right text-xs sm:text-sm'>{tech.avgResolutionHours}h</TableCell>
                     </TableRow>

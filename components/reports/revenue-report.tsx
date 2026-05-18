@@ -37,7 +37,7 @@ export function RevenueReport({ data }: RevenueReportProps) {
       <div className='grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4'>
         <Card>
           <CardHeader className='pb-1 sm:pb-2'>
-            <CardTitle className='text-xs sm:text-sm font-medium text-gray-600'>Revenue</CardTitle>
+            <CardTitle className='text-xs sm:text-sm font-medium text-muted-foreground'>Revenue</CardTitle>
           </CardHeader>
           <CardContent>
             <div className='text-lg sm:text-2xl font-bold text-green-600'>${(totalRevenue / 1000).toFixed(0)}K</div>
@@ -46,28 +46,28 @@ export function RevenueReport({ data }: RevenueReportProps) {
 
         <Card>
           <CardHeader className='pb-1 sm:pb-2'>
-            <CardTitle className='text-xs sm:text-sm font-medium text-gray-600'>Cost</CardTitle>
+            <CardTitle className='text-xs sm:text-sm font-medium text-muted-foreground'>Cost</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className='text-lg sm:text-2xl font-bold text-orange-600'>${(totalCost / 1000).toFixed(0)}K</div>
+            <div className='text-lg sm:text-2xl font-bold text-primary'>${(totalCost / 1000).toFixed(0)}K</div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className='pb-1 sm:pb-2'>
-            <CardTitle className='text-xs sm:text-sm font-medium text-gray-600'>Profit</CardTitle>
+            <CardTitle className='text-xs sm:text-sm font-medium text-muted-foreground'>Profit</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className='text-lg sm:text-2xl font-bold text-blue-600'>${(totalProfit / 1000).toFixed(0)}K</div>
+            <div className='text-lg sm:text-2xl font-bold text-secondary'>${(totalProfit / 1000).toFixed(0)}K</div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className='pb-1 sm:pb-2'>
-            <CardTitle className='text-xs sm:text-sm font-medium text-gray-600'>Margin</CardTitle>
+            <CardTitle className='text-xs sm:text-sm font-medium text-muted-foreground'>Margin</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className={`text-lg sm:text-2xl font-bold ${profitMargin >= 60 ? 'text-green-600' : profitMargin >= 40 ? 'text-yellow-600' : 'text-red-600'}`}>{profitMargin}%</div>
+            <div className={`text-lg sm:text-2xl font-bold ${profitMargin >= 60 ? 'text-secondary' : profitMargin >= 40 ? 'text-primary' : 'text-destructive'}`}>{profitMargin}%</div>
           </CardContent>
         </Card>
       </div>
@@ -98,11 +98,11 @@ export function RevenueReport({ data }: RevenueReportProps) {
                   <TableRow key={tech.technicianId}>
                     <TableCell className='font-medium text-xs sm:text-sm'>{tech.technicianName}</TableCell>
                     <TableCell className='text-right text-xs sm:text-sm'>{tech.totalTickets}</TableCell>
-                    <TableCell className='hidden sm:table-cell text-right font-semibold text-green-600 text-xs sm:text-sm'>${(tech.estimatedRevenue / 1000).toFixed(0)}K</TableCell>
-                    <TableCell className='hidden lg:table-cell text-right font-semibold text-orange-600 text-xs sm:text-sm'>${(tech.internalCost / 1000).toFixed(0)}K</TableCell>
-                    <TableCell className='text-right font-semibold text-blue-600 text-xs sm:text-sm'>${(tech.estimatedProfit / 1000).toFixed(0)}K</TableCell>
+                    <TableCell className='hidden sm:table-cell text-right font-semibold text-secondary text-xs sm:text-sm'>${(tech.estimatedRevenue / 1000).toFixed(0)}K</TableCell>
+                    <TableCell className='hidden lg:table-cell text-right font-semibold text-primary text-xs sm:text-sm'>${(tech.internalCost / 1000).toFixed(0)}K</TableCell>
+                    <TableCell className='text-right font-semibold text-secondary text-xs sm:text-sm'>${(tech.estimatedProfit / 1000).toFixed(0)}K</TableCell>
                     <TableCell className='text-right'>
-                      <Badge className={`text-xs ${tech.profitMargin >= 60 ? 'bg-green-600' : tech.profitMargin >= 40 ? 'bg-yellow-600' : 'bg-red-600'}`}>{tech.profitMargin}%</Badge>
+                      <Badge className={`text-xs ${tech.profitMargin >= 60 ? 'bg-secondary' : tech.profitMargin >= 40 ? 'bg-primary' : 'bg-destructive'}`}>{tech.profitMargin}%</Badge>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -133,7 +133,7 @@ export function RevenueReport({ data }: RevenueReportProps) {
                 <div key={tech.technicianId} className='flex items-center justify-between'>
                   <span className='font-medium'>{tech.technicianName}</span>
                   <div className='flex items-center gap-3'>
-                    <div className='w-48 bg-gray-200 rounded-full h-2'>
+                    <div className='w-48 bg-muted rounded-full h-2'>
                       <div className='h-2 rounded-full bg-blue-500' style={{ width: `${Math.min((tech.revenuePerTicket / 500) * 100, 100)}%` }}></div>
                     </div>
                     <Badge variant='outline'>${tech.revenuePerTicket}</Badge>

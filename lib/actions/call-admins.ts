@@ -165,7 +165,7 @@ const getCachedCallAdminStats = (callAdminId: string) =>
 export async function getCallAdminStats(callAdminId: string) {
   try {
     const currentUser = await getCurrentUser();
-    if (!currentUser || currentUser.role !== 'admin') {
+    if (!currentUser || !['store_admin', 'super_admin'].includes(currentUser.role)) {
       return { success: false, error: 'Unauthorized' };
     }
 
@@ -236,7 +236,7 @@ const getCachedCallAdminTickets = (callAdminId: string) =>
 export async function getCallAdminTickets(callAdminId: string) {
   try {
     const currentUser = await getCurrentUser();
-    if (!currentUser || currentUser.role !== 'admin') {
+    if (!currentUser || !['store_admin', 'super_admin'].includes(currentUser.role)) {
       return { success: false, error: 'Unauthorized', tickets: [] };
     }
 

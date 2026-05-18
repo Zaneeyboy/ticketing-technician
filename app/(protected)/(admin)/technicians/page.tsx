@@ -14,15 +14,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 import { ColumnDef, flexRender, getCoreRowModel, getFilteredRowModel, getPaginationRowModel, getSortedRowModel, useReactTable, SortingState } from '@tanstack/react-table';
-import { collection, getDocs, query, where, orderBy } from 'firebase/firestore';
-import { db } from '@/lib/firebase/client';
-import { Ticket, User } from '@/lib/types';
+import { User } from '@/lib/types';
 import { formatDate } from '@/lib/utils';
 import { Eye, ArrowUpDown, Briefcase, CheckCircle, Clock } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { TableSkeleton } from '@/components/skeletons/table-skeleton';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getWorkLogsForTicket } from '@/lib/actions/work-logs';
+import { getStoreTickets, getTechnicianTickets, StoreTicketRow } from '@/lib/actions/tickets';
+import { getDocs, query, collection, where } from 'firebase/firestore';
+import { db } from '@/lib/firebase/client';
 
 interface TechnicianRow extends User {
   assignedCount: number;
@@ -32,7 +33,7 @@ interface TechnicianRow extends User {
   avgResolutionHours?: number;
 }
 
-interface TechnicianTicket extends Ticket {
+interface TechnicianTicket extends StoreTicketRow {
   technicianName?: string;
 }
 
@@ -71,7 +72,7 @@ export default function TechniciansPage() {
   const [ticketTablePagination, setTicketTablePagination] = useState({ pageIndex: 0, pageSize: 10 });
 
   useEffect(() => {
-    if (!user || !['admin', 'management'].includes(user.role)) {
+    if (!user || !['super_admin', 'store_admin'].includes(user.role)) {
       router.push('/dashboard');
       return;
     }
@@ -82,10 +83,9 @@ export default function TechniciansPage() {
     try {
       setLoading(true);
       const techSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'technician')));
-      const ticketSnap = await getDocs(query(collection(db, 'tickets'), orderBy('createdAt', 'desc')));
+      const tickets = await getStoreTickets();
 
       const techniciansMap = new Map<string, TechnicianRow>();
-      const tickets = ticketSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Ticket);
 
       techSnap.docs.forEach((doc) => {
         const techData = doc.data() as User;
@@ -109,8 +109,8 @@ export default function TechniciansPage() {
         if (ticket.status === 'Closed') {
           tech.closedCount += 1;
           if (ticket.closedAt && ticket.createdAt) {
-            const createdTime = new Date(ticket.createdAt.toString()).getTime();
-            const closedTime = new Date(ticket.closedAt.toString()).getTime();
+            const createdTime = ticket.createdAt.getTime();
+            const closedTime = ticket.closedAt.getTime();
             const hours = (closedTime - createdTime) / (1000 * 60 * 60);
             if (!totals.has(ticket.assignedTo)) {
               totals.set(ticket.assignedTo, { totalHours: 0, count: 0 });
@@ -122,7 +122,7 @@ export default function TechniciansPage() {
             }
           }
           if (ticket.closedAt) {
-            const closedDate = new Date(ticket.closedAt.toString());
+            const closedDate = ticket.closedAt;
             const tech = techniciansMap.get(ticket.assignedTo);
             if (tech && (!tech.lastClosedAt || closedDate > tech.lastClosedAt)) {
               tech.lastClosedAt = closedDate;
@@ -152,9 +152,8 @@ export default function TechniciansPage() {
   const loadTechnicianTickets = async (technicianId: string) => {
     try {
       setTicketsLoading(true);
-      const ticketSnap = await getDocs(query(collection(db, 'tickets'), where('assignedTo', '==', technicianId), orderBy('createdAt', 'desc')));
-      const tickets = ticketSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as TechnicianTicket);
-      setTechnicianTickets(tickets);
+      const tickets = await getTechnicianTickets(technicianId);
+      setTechnicianTickets(tickets as TechnicianTicket[]);
     } catch (error) {
       console.error('Error loading tickets:', error);
     } finally {
@@ -206,28 +205,28 @@ export default function TechniciansPage() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'Open':
-        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200';
+        return 'bg-amber-500/15 text-amber-700 dark:text-amber-400';
       case 'Assigned':
-        return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
+        return 'bg-primary/10 text-primary dark:bg-primary/15';
       case 'Closed':
-        return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
+        return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400';
       default:
-        return 'bg-slate-100 text-slate-800 dark:bg-slate-900 dark:text-slate-200';
+        return 'bg-muted text-muted-foreground';
     }
   };
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
       case 'Low':
-        return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
+        return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400';
       case 'Medium':
-        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200';
+        return 'bg-amber-500/15 text-amber-700 dark:text-amber-400';
       case 'High':
-        return 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200';
+        return 'bg-orange-500/15 text-orange-700 dark:text-orange-400';
       case 'Urgent':
-        return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200';
+        return 'bg-red-500/15 text-red-700 dark:text-red-400';
       default:
-        return 'bg-slate-100 text-slate-800 dark:bg-slate-900 dark:text-slate-200';
+        return 'bg-muted text-muted-foreground';
     }
   };
 
@@ -340,7 +339,7 @@ export default function TechniciansPage() {
     },
   });
 
-  if (!user || !['admin', 'management'].includes(user.role)) return null;
+  if (!user || !['super_admin', 'store_admin'].includes(user.role)) return null;
 
   return (
     <DashboardLayout>
@@ -436,7 +435,7 @@ export default function TechniciansPage() {
               </TabsList>
 
               <TabsContent value='overview' className='space-y-4'>
-                <div className='grid grid-cols-3 gap-4'>
+                <div className='grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4'>
                   <Card className='border-blue-100'>
                     <CardHeader className='pb-3'>
                       <CardTitle className='text-sm font-medium'>Total Assigned</CardTitle>

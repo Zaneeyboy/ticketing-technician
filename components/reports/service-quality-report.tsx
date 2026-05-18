@@ -17,7 +17,7 @@ export function ServiceQualityReport({ data }: ServiceQualityReportProps) {
       <div className='grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4'>
         <Card>
           <CardHeader className='pb-1 sm:pb-2'>
-            <CardTitle className='text-xs sm:text-sm font-medium text-gray-600'>Tickets</CardTitle>
+            <CardTitle className='text-xs sm:text-sm font-medium text-muted-foreground'>Tickets</CardTitle>
           </CardHeader>
           <CardContent>
             <div className='text-xl sm:text-2xl font-bold'>{data.totalTickets}</div>
@@ -26,7 +26,7 @@ export function ServiceQualityReport({ data }: ServiceQualityReportProps) {
 
         <Card>
           <CardHeader className='pb-1 sm:pb-2'>
-            <CardTitle className='text-xs sm:text-sm font-medium text-gray-600'>Closed</CardTitle>
+            <CardTitle className='text-xs sm:text-sm font-medium text-muted-foreground'>Closed</CardTitle>
           </CardHeader>
           <CardContent>
             <div className='text-xl sm:text-2xl font-bold text-green-600'>{data.closedTickets}</div>
@@ -35,10 +35,10 @@ export function ServiceQualityReport({ data }: ServiceQualityReportProps) {
 
         <Card>
           <CardHeader className='pb-1 sm:pb-2'>
-            <CardTitle className='text-xs sm:text-sm font-medium text-gray-600'>1st-Time Fix</CardTitle>
+            <CardTitle className='text-xs sm:text-sm font-medium text-muted-foreground'>1st-Time Fix</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className={`text-xl sm:text-2xl font-bold ${data.firstTimeFixRate >= 80 ? 'text-green-600' : data.firstTimeFixRate >= 60 ? 'text-yellow-600' : 'text-orange-600'}`}>
+            <div className={`text-xl sm:text-2xl font-bold ${data.firstTimeFixRate >= 80 ? 'text-secondary' : data.firstTimeFixRate >= 60 ? 'text-primary' : 'text-destructive'}`}>
               {data.firstTimeFixRate}%
             </div>
           </CardContent>
@@ -46,7 +46,7 @@ export function ServiceQualityReport({ data }: ServiceQualityReportProps) {
 
         <Card>
           <CardHeader className='pb-1 sm:pb-2'>
-            <CardTitle className='text-xs sm:text-sm font-medium text-gray-600'>Avg Time</CardTitle>
+            <CardTitle className='text-xs sm:text-sm font-medium text-muted-foreground'>Avg Time</CardTitle>
           </CardHeader>
           <CardContent>
             <div className='text-xl sm:text-2xl font-bold'>{data.avgResolutionHours}h</div>
@@ -66,31 +66,31 @@ export function ServiceQualityReport({ data }: ServiceQualityReportProps) {
           <div className='grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6'>
             {/* First-Time Fix Rate */}
             <div className='border rounded-lg p-3 sm:p-4'>
-              <div className='text-xs sm:text-sm font-semibold text-gray-700 mb-2 sm:mb-3'>First-Time Fix</div>
-              <div className='relative w-full h-3 bg-gray-200 rounded-full overflow-hidden'>
-                <div className={`h-full rounded-full bg-green-500`} style={{ width: `${data.firstTimeFixRate}%` }}></div>
+              <div className='text-xs sm:text-sm font-semibold text-foreground mb-2 sm:mb-3'>First-Time Fix</div>
+              <div className='relative w-full h-3 bg-muted rounded-full overflow-hidden'>
+                <div className={`h-full rounded-full bg-secondary`} style={{ width: `${data.firstTimeFixRate}%` }}></div>
               </div>
               <div className='flex justify-between mt-2 text-xs sm:text-sm'>
-                <span className='text-gray-600'>First visit</span>
+                <span className='text-muted-foreground'>First visit</span>
                 <span className='font-semibold'>{data.firstTimeFixRate}%</span>
               </div>
-              <div className='text-xs text-gray-500 mt-1'>Goal: {data.firstTimeFixRate >= 85 ? '✓ On Target' : '✗ Below Target'}</div>
+              <div className='text-xs text-muted-foreground mt-1'>Goal: {data.firstTimeFixRate >= 85 ? '✓ On Target' : '✗ Below Target'}</div>
             </div>
 
             {/* Repeat Rate */}
             <div className='border rounded-lg p-3 sm:p-4'>
-              <div className='text-xs sm:text-sm font-semibold text-gray-700 mb-2 sm:mb-3'>Repeat Rate</div>
-              <div className='relative w-full h-3 bg-gray-200 rounded-full overflow-hidden'>
+              <div className='text-xs sm:text-sm font-semibold text-foreground mb-2 sm:mb-3'>Repeat Rate</div>
+              <div className='relative w-full h-3 bg-muted rounded-full overflow-hidden'>
                 <div
-                  className={`h-full rounded-full ${data.repeatTicketRate <= 20 ? 'bg-green-500' : data.repeatTicketRate <= 35 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                  className={`h-full rounded-full ${data.repeatTicketRate <= 20 ? 'bg-secondary' : data.repeatTicketRate <= 35 ? 'bg-primary' : 'bg-destructive'}`}
                   style={{ width: `${Math.min(data.repeatTicketRate, 100)}%` }}
                 ></div>
               </div>
               <div className='flex justify-between mt-2 text-xs sm:text-sm'>
-                <span className='text-gray-600'>Same machines</span>
+                <span className='text-muted-foreground'>Same machines</span>
                 <span className='font-semibold'>{data.repeatTicketRate}%</span>
               </div>
-              <div className='text-xs text-gray-500 mt-1'>Goal: {data.repeatTicketRate <= 20 ? '✓ On Target' : '✗ Above Target'}</div>
+              <div className='text-xs text-muted-foreground mt-1'>Goal: {data.repeatTicketRate <= 20 ? '✓ On Target' : '✗ Above Target'}</div>
             </div>
           </div>
         </CardContent>
@@ -115,23 +115,23 @@ export function ServiceQualityReport({ data }: ServiceQualityReportProps) {
                       {issue.count}
                     </Badge>
                   </div>
-                  <div className='w-full bg-gray-200 rounded-full h-2'>
-                    <div className='h-2 rounded-full bg-blue-500' style={{ width: `${data.totalTickets > 0 ? (issue.count / data.totalTickets) * 100 : 0}%` }}></div>
+                  <div className='w-full bg-muted rounded-full h-2'>
+                    <div className='h-2 rounded-full bg-secondary' style={{ width: `${data.totalTickets > 0 ? (issue.count / data.totalTickets) * 100 : 0}%` }}></div>
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <div className='text-center text-gray-500 py-4 text-sm'>No issue data available</div>
+            <div className='text-center text-muted-foreground py-4 text-sm'>No issue data available</div>
           )}
         </CardContent>
       </Card>
 
       {/* Machines with Repeat Issues */}
       {data.machinesWithRepeatIssues.length > 0 && (
-        <Card className='border-orange-200 bg-orange-50'>
+        <Card className='border-primary/20 bg-primary/5 dark:bg-primary/10'>
           <CardHeader>
-            <CardTitle className='flex items-center gap-2 text-orange-900 text-base sm:text-lg'>
+            <CardTitle className='flex items-center gap-2 text-primary text-base sm:text-lg'>
               <Repeat2 className='h-4 sm:h-5 w-4 sm:w-5' />
               Problem Machines
             </CardTitle>
@@ -152,7 +152,7 @@ export function ServiceQualityReport({ data }: ServiceQualityReportProps) {
                       <TableCell className='font-medium text-xs sm:text-sm'>{item.serialNumber}</TableCell>
                       <TableCell className='hidden sm:table-cell text-xs sm:text-sm max-w-xs truncate'>{item.issue}</TableCell>
                       <TableCell className='text-right'>
-                        <Badge className='bg-orange-600 text-xs'>{item.count}x</Badge>
+                        <Badge className='bg-primary text-xs'>{item.count}x</Badge>
                       </TableCell>
                     </TableRow>
                   ))}

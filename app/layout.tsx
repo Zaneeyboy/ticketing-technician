@@ -1,14 +1,24 @@
 import type { Metadata } from 'next';
-import { Geist, Geist_Mono } from 'next/font/google';
+import { Barlow, Geist_Mono, Inter } from 'next/font/google';
 import './globals.css';
 import { AuthProvider } from '@/lib/auth/auth-provider';
 import { ToastProvider } from '@/lib/providers/toast-provider';
 import { AppThemeProvider } from '@/components/theme-provider';
 import { TooltipProvider } from '@/components/ui/tooltip';
 
-const geistSans = Geist({
+// Inter — clean geometric sans-serif, closest Google Fonts match to CR's Proxima Nova
+const inter = Inter({
   variable: '--font-geist-sans',
   subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
+});
+
+// Barlow — semi-condensed bold display, closest match to CR's Placard Next
+const barlow = Barlow({
+  variable: '--font-playfair-display',
+  subsets: ['latin'],
+  weight: ['600', '700', '800'],
+  style: ['normal'],
 });
 
 const geistMono = Geist_Mono({
@@ -17,8 +27,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Tech Dynamics Ticketing System',
-  description: 'Technician ticketing and service management system',
+  title: 'Caribbean Roasters | Field Service Platform',
+  description: 'The unified service operations platform for Caribbean Roasters — manage tickets, technicians, machines, and multi-island reporting from one place.',
 };
 
 export default function RootLayout({
@@ -28,7 +38,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang='en' suppressHydrationWarning>
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      <body className={`${inter.variable} ${barlow.variable} ${geistMono.variable} antialiased`}>
         <AppThemeProvider>
           <TooltipProvider>
             <AuthProvider>

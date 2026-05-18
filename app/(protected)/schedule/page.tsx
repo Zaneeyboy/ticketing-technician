@@ -1,10 +1,10 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/dashboard-layout';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -13,12 +13,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase/client';
 import { Ticket } from '@/lib/types';
-import { formatDate } from '@/lib/utils';
-import { Calendar, List, Clock, MapPin, Wrench, ChevronLeft, ChevronRight, Filter, X, Eye } from 'lucide-react';
+import { Calendar, List, Clock, MapPin, Wrench, ChevronLeft, ChevronRight, X, Eye, CalendarDays, Users } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { getCustomers } from '@/lib/actions/customers';
 import { getTechniciansForAssignment } from '@/lib/actions/tickets';
+import { DateRangeExportButton } from '@/components/export-button';
 
 interface ScheduledVisit extends Ticket {
   scheduledVisitDate: Date;
@@ -30,8 +30,37 @@ interface ScheduledVisit extends Ticket {
   };
 }
 
+const PRIORITY_CFG: Record<string, { bar: string; chip: string; dot: string }> = {
+  Urgent: { bar: 'bg-red-500', chip: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300', dot: 'bg-red-500' },
+  High: { bar: 'bg-orange-500', chip: 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300', dot: 'bg-orange-500' },
+  Medium: { bar: 'bg-yellow-400', chip: 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300', dot: 'bg-yellow-400' },
+  Low: { bar: 'bg-emerald-500', chip: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300', dot: 'bg-emerald-500' },
+};
+
+function topPriority(visit: ScheduledVisit): string {
+  const order = ['Urgent', 'High', 'Medium', 'Low'];
+  for (const p of order) {
+    if (visit.machines?.some((m) => m.priority === p)) return p;
+  }
+  return 'Low';
+}
+
+function getInitials(name: string): string {
+  return name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((n) => n[0])
+    .join('')
+    .toUpperCase();
+}
+
+function sameDay(a: Date, b: Date): boolean {
+  return a.getDate() === b.getDate() && a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
+}
+
 export default function SchedulePage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const [scheduledVisits, setScheduledVisits] = useState<ScheduledVisit[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,16 +77,17 @@ export default function SchedulePage() {
 
   // Determine user role capabilities early
   const isCallAdmin = user?.role === 'call_admin';
-  const canSeeAllSchedules = user?.role ? ['admin', 'management', 'call_admin'].includes(user.role) : false;
+  const canSeeAllSchedules = user?.role ? ['admin', 'management', 'call_admin', 'store_admin', 'store_manager', 'super_admin'].includes(user.role) : false;
 
   useEffect(() => {
-    if (!user || !['technician', 'call_admin', 'admin', 'management'].includes(user.role)) {
+    if (authLoading) return;
+    if (!user || !['technician', 'call_admin', 'admin', 'management', 'store_admin', 'store_manager', 'super_admin'].includes(user.role)) {
       router.push('/dashboard');
       return;
     }
     loadScheduledVisits();
     loadTechnicians();
-  }, [user, router]);
+  }, [user, authLoading, router]);
 
   const loadTechnicians = async () => {
     try {
@@ -71,21 +101,19 @@ export default function SchedulePage() {
   const loadScheduledVisits = async () => {
     try {
       setLoading(true);
-      if (!user?.uid) return;
+      if (!user?.uid || !user?.storeId) return;
 
       // Fetch all customers using server action
       const customers = await getCustomers();
       const customerMap = new Map(customers.map((c) => [c.id, c]));
 
-      const ticketsRef = collection(db, 'tickets');
+      const ticketsRef = collection(db, 'stores', user.storeId, 'tickets');
 
-      // Admin, management, and call admins see all technicians' schedules, technicians see only their own
+      // Admins see all scheduled visits; technicians only see their own
       let q;
-      if (['admin', 'management', 'call_admin'].includes(user.role)) {
-        // Show all scheduled visits for all technicians
+      if (canSeeAllSchedules) {
         q = query(ticketsRef, where('status', 'in', ['Open', 'Assigned']));
       } else {
-        // Show only this technician's scheduled visits
         q = query(ticketsRef, where('assignedTo', '==', user.uid), where('status', 'in', ['Open', 'Assigned']));
       }
 
@@ -199,6 +227,42 @@ export default function SchedulePage() {
     return filteredVisits.filter((visit) => visit.scheduledVisitDate >= now);
   }, [filteredVisits]);
 
+  const _today = new Date();
+
+  const todayCount = useMemo(() => {
+    const t = new Date();
+    return filteredVisits.filter((v) => sameDay(v.scheduledVisitDate, t)).length;
+  }, [filteredVisits]);
+
+  const weekCount = useMemo(() => {
+    const now = new Date();
+    const sun = new Date(now);
+    sun.setDate(now.getDate() - now.getDay());
+    sun.setHours(0, 0, 0, 0);
+    const sat = new Date(sun);
+    sat.setDate(sun.getDate() + 6);
+    sat.setHours(23, 59, 59, 999);
+    return filteredVisits.filter((v) => v.scheduledVisitDate >= sun && v.scheduledVisitDate <= sat).length;
+  }, [filteredVisits]);
+
+  const monthCount = useMemo(() => {
+    const now = new Date();
+    return filteredVisits.filter((v) => v.scheduledVisitDate.getMonth() === now.getMonth() && v.scheduledVisitDate.getFullYear() === now.getFullYear()).length;
+  }, [filteredVisits]);
+
+  const visitsByDay = useMemo(() => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const map = new Map<string, { date: Date; visits: ScheduledVisit[] }>();
+    for (const v of filteredVisits) {
+      if (v.scheduledVisitDate < now) continue;
+      const key = v.scheduledVisitDate.toDateString();
+      if (!map.has(key)) map.set(key, { date: v.scheduledVisitDate, visits: [] });
+      map.get(key)!.visits.push(v);
+    }
+    return Array.from(map.values()).sort((a, b) => a.date.getTime() - b.date.getTime());
+  }, [filteredVisits]);
+
   const clearFilters = () => {
     setSelectedTechnician('all');
     setSelectedCustomer('all');
@@ -220,398 +284,412 @@ export default function SchedulePage() {
   const monthName = currentMonth.toLocaleString('default', { month: 'long', year: 'numeric' });
 
   const calendarDays: React.ReactElement[] = [];
-  // Add empty cells for days before the first day of the month
+  const isWeekend = (d: number) => d === 0 || d === 6;
   for (let i = 0; i < startingDayOfWeek; i++) {
-    calendarDays.push(<div key={`empty-${i}`} className='h-24 bg-slate-50 dark:bg-slate-900/50' />);
+    calendarDays.push(<div key={`empty-${i}`} className={`min-h-[3rem] sm:min-h-24 p-1.5 ${isWeekend(i) ? 'bg-muted/20' : ''}`} />);
   }
-  // Add cells for each day of the month
   for (let day = 1; day <= daysInMonth; day++) {
     const date = new Date(year, month, day);
     const visitsForDay = getVisitsForDate(date);
-    const isToday = new Date().toDateString() === date.toDateString();
+    const isToday = _today.toDateString() === date.toDateString();
+    const dow = date.getDay();
 
     calendarDays.push(
       <div
         key={day}
-        className={`h-24 border border-slate-200 dark:border-slate-700 p-2 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors ${
-          isToday ? 'bg-blue-50 dark:bg-blue-950/30 border-blue-300 dark:border-blue-700' : ''
-        }`}
+        className={`min-h-[3rem] sm:min-h-24 p-1 sm:p-1.5 cursor-pointer transition-colors hover:bg-muted/40 ${isWeekend(dow) ? 'bg-muted/20' : ''} ${isToday ? 'bg-primary/5 ring-1 ring-inset ring-primary/30' : ''}`}
         onClick={() => {
           setSelectedDate(date);
           setIsDateModalOpen(true);
         }}
       >
-        <div className={`text-sm font-semibold mb-1 ${isToday ? 'text-blue-600 dark:text-blue-400' : ''}`}>{day}</div>
+        <div
+          className={`w-5 h-5 sm:w-6 sm:h-6 rounded-full flex items-center justify-center text-xs font-semibold mb-0.5 sm:mb-1 ${isToday ? 'bg-primary text-primary-foreground' : 'text-foreground'}`}
+        >
+          {day}
+        </div>
         {visitsForDay.length > 0 && (
-          <div className='space-y-1'>
-            {visitsForDay.slice(0, 2).map((visit) => (
-              <div
-                key={visit.id}
-                className='text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 px-1 py-0.5 rounded truncate'
-                title={`${visit.ticketNumber}${canSeeAllSchedules && visit.assignedToName ? ` - ${visit.assignedToName}` : ''} - ${visit.customerInfo?.companyName || 'Customer'}`}
-              >
-                {visit.scheduledVisitDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
-                {' - '}
-                {visit.customerInfo?.companyName || 'Customer'}
-              </div>
-            ))}
-            {visitsForDay.length > 2 && <div className='text-xs text-slate-500 dark:text-slate-400'>+{visitsForDay.length - 2} more</div>}
-          </div>
+          <>
+            {/* Mobile: colored dots only */}
+            <div className='sm:hidden flex flex-wrap gap-0.5'>
+              {visitsForDay.slice(0, 4).map((visit) => {
+                const p = topPriority(visit);
+                const cfg = PRIORITY_CFG[p] ?? PRIORITY_CFG.Low;
+                return <span key={visit.id} className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />;
+              })}
+              {visitsForDay.length > 4 && <span className='text-[8px] leading-none text-muted-foreground self-center'>+{visitsForDay.length - 4}</span>}
+            </div>
+            {/* Desktop: full text chips */}
+            <div className='hidden sm:block space-y-0.5'>
+              {visitsForDay.slice(0, 3).map((visit) => {
+                const p = topPriority(visit);
+                const cfg = PRIORITY_CFG[p] ?? PRIORITY_CFG.Low;
+                return (
+                  <div
+                    key={visit.id}
+                    className={`text-xs px-1.5 py-0.5 rounded flex items-center gap-1 truncate ${cfg.chip}`}
+                    title={`${visit.ticketNumber} · ${visit.customerInfo?.companyName ?? ''}`}
+                  >
+                    <span className={`shrink-0 w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
+                    <span className='truncate'>
+                      {visit.scheduledVisitDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                      {' · '}
+                      {visit.customerInfo?.companyName || 'Customer'}
+                    </span>
+                  </div>
+                );
+              })}
+              {visitsForDay.length > 3 && <div className='text-xs text-muted-foreground px-1'>+{visitsForDay.length - 3} more</div>}
+            </div>
+          </>
         )}
       </div>,
     );
   }
 
-  if (!user || !['technician', 'call_admin', 'admin', 'management'].includes(user.role)) return null;
+  if (authLoading || !user || !['technician', 'call_admin', 'admin', 'management', 'store_admin', 'store_manager', 'super_admin'].includes(user.role)) return null;
+
+  // ── Shared visit card ───────────────────────────────────────────────────────
+  const VisitCard = ({ visit }: { visit: ScheduledVisit }) => {
+    const p = topPriority(visit);
+    const cfg = PRIORITY_CFG[p] ?? PRIORITY_CFG.Low;
+    return (
+      <div className='relative bg-card border border-border rounded-xl overflow-hidden transition-all hover:shadow-md hover:-translate-y-px'>
+        <div className={`absolute left-0 inset-y-0 w-1 ${cfg.bar}`} />
+        <div className='pl-4 pr-4 py-3 space-y-2'>
+          <div className='flex items-start justify-between gap-2'>
+            <div className='flex items-start gap-2.5 min-w-0'>
+              {visit.assignedToName && (
+                <div className='shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary'>{getInitials(visit.assignedToName)}</div>
+              )}
+              <div className='min-w-0'>
+                <div className='flex items-center gap-1.5 flex-wrap'>
+                  <span className='font-mono text-xs text-muted-foreground'>{visit.ticketNumber}</span>
+                  <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${cfg.chip}`}>{p}</span>
+                  <Badge variant='outline' className='text-xs h-4 px-1'>
+                    {visit.status}
+                  </Badge>
+                </div>
+                <p className='font-semibold text-sm mt-0.5 truncate'>{visit.customerInfo?.companyName || 'Unknown Client'}</p>
+                {canSeeAllSchedules && visit.assignedToName && <p className='text-xs text-muted-foreground'>{visit.assignedToName}</p>}
+              </div>
+            </div>
+            <div className='shrink-0 flex items-center gap-1 text-sm font-semibold text-primary whitespace-nowrap'>
+              <Clock className='h-3.5 w-3.5' />
+              {visit.scheduledVisitDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+            </div>
+          </div>
+          <div className='flex flex-wrap gap-3 text-xs text-muted-foreground'>
+            {visit.customerInfo?.address && (
+              <span className='flex items-center gap-1'>
+                <MapPin className='h-3 w-3 shrink-0' />
+                <span className='truncate max-w-48'>{visit.customerInfo.address}</span>
+              </span>
+            )}
+            {visit.machines[0] && (
+              <span className='flex items-center gap-1'>
+                <Wrench className='h-3 w-3 shrink-0' />
+                {visit.machines[0].machineType}
+                {visit.machines.length > 1 ? ` +${visit.machines.length - 1} more` : ''}
+              </span>
+            )}
+          </div>
+          {visit.issueDescription && <p className='text-xs text-muted-foreground line-clamp-1'>{visit.issueDescription}</p>}
+          <div className='flex justify-end pt-0.5'>
+            <Button
+              variant='outline'
+              size='sm'
+              className='h-7 text-xs gap-1'
+              onClick={() => {
+                router.push(`/tickets?id=${visit.id}`);
+                setIsDateModalOpen(false);
+              }}
+            >
+              <Eye className='h-3 w-3' />
+              View Ticket
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <DashboardLayout>
-      <div className='space-y-6'>
-        <div>
-          <h2 className='text-2xl font-bold'>{canSeeAllSchedules ? 'Technician Schedules' : 'My Schedule'}</h2>
-          <p className='text-slate-600 dark:text-slate-400'>{canSeeAllSchedules ? "View all technicians' scheduled site visits" : 'View your upcoming scheduled site visits'}</p>
+      <div className='space-y-5'>
+        {/* ── Header ────────────────────────────────────────────────────────── */}
+        <div className='flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4'>
+          <div>
+            <div className='flex items-center gap-3 mb-1'>
+              <div className='rounded-xl bg-primary/10 p-2.5'>
+                <CalendarDays className='h-5 w-5 text-primary' />
+              </div>
+              <h1 className='text-2xl font-bold tracking-tight'>{canSeeAllSchedules ? 'Schedule' : 'My Schedule'}</h1>
+            </div>
+            <p className='text-sm text-muted-foreground ml-14'>{canSeeAllSchedules ? "All technicians' planned site visits" : 'Your upcoming site visits'}</p>
+          </div>
+          <DateRangeExportButton
+            allData={scheduledVisits as unknown as Record<string, any>[]}
+            filterFn={(data, from, to) =>
+              data.filter((v) => {
+                const d = v.scheduledVisitDate instanceof Date ? v.scheduledVisitDate : new Date(v.scheduledVisitDate);
+                return d >= from && d <= to;
+              })
+            }
+            columns={[
+              { header: 'Ticket #', key: 'ticketNumber' },
+              { header: 'Customer', key: 'customerInfo', formatter: (v) => v?.companyName ?? '' },
+              { header: 'Contact', key: 'customerInfo', formatter: (v) => v?.contactPerson ?? '' },
+              { header: 'Address', key: 'customerInfo', formatter: (v) => v?.address ?? '' },
+              { header: 'Technician', key: 'assignedToName', formatter: (v) => v ?? 'Unassigned' },
+              { header: 'Scheduled Date', key: 'scheduledVisitDate', formatter: (v) => (v instanceof Date ? v.toLocaleDateString('en-TT') : '') },
+              { header: 'Status', key: 'status' },
+            ]}
+            filename='schedule-export'
+            sheetName='Schedule'
+            title={canSeeAllSchedules ? 'Technician Schedules' : 'My Schedule'}
+          />
         </div>
 
-        {/* Filters Section */}
-        {canSeeAllSchedules && (
-          <Card>
-            <CardHeader>
-              <div className='flex items-center justify-between'>
-                <div className='flex items-center gap-2'>
-                  <Filter className='h-4 w-4' />
-                  <CardTitle className='text-base'>Filters</CardTitle>
+        {/* ── Stat pills ────────────────────────────────────────────────────── */}
+        {!loading && (
+          <div className='grid grid-cols-3 gap-2 sm:gap-3'>
+            <Card className='animate-card-enter border-t-4 border-t-primary/60 bg-linear-to-br from-primary/5 via-background to-background'>
+              <CardContent className='pt-3 pb-3 px-3 sm:px-6 sm:pt-4 sm:pb-6 flex flex-col sm:flex-row items-center gap-1 sm:gap-3 text-center sm:text-left'>
+                <div className='rounded-lg bg-primary/10 p-1.5 sm:p-2'>
+                  <CalendarDays className='h-3.5 w-3.5 sm:h-4 sm:w-4 text-primary' />
                 </div>
-                {hasActiveFilters && (
-                  <Button variant='ghost' size='sm' onClick={clearFilters} className='h-8 gap-1'>
-                    <X className='h-3 w-3' />
-                    Clear Filters
-                  </Button>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4'>
-                {/* Technician Filter */}
-                <div className='space-y-2'>
-                  <label className='text-sm font-medium'>Technician</label>
-                  <Select value={selectedTechnician} onValueChange={setSelectedTechnician}>
-                    <SelectTrigger className='w-full'>
-                      <SelectValue placeholder='All Technicians' />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value='all'>All Technicians</SelectItem>
-                      {technicians.map((tech) => (
-                        <SelectItem key={tech.id} value={tech.id}>
-                          {tech.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div>
+                  <p className='text-xl sm:text-2xl font-bold'>{todayCount}</p>
+                  <p className='text-[10px] sm:text-xs text-muted-foreground'>Today</p>
                 </div>
-
-                {/* Customer Filter */}
-                <div className='space-y-2'>
-                  <label className='text-sm font-medium'>Customer</label>
-                  <Select value={selectedCustomer} onValueChange={setSelectedCustomer}>
-                    <SelectTrigger className='w-full'>
-                      <SelectValue placeholder='All Customers' />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value='all'>All Customers</SelectItem>
-                      {uniqueCustomers.map((customer) => (
-                        <SelectItem key={customer} value={customer}>
-                          {customer}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+              </CardContent>
+            </Card>
+            <Card className='animate-card-enter border-t-4 border-t-blue-500/60 bg-linear-to-br from-blue-500/5 via-background to-background'>
+              <CardContent className='pt-3 pb-3 px-3 sm:px-6 sm:pt-4 sm:pb-6 flex flex-col sm:flex-row items-center gap-1 sm:gap-3 text-center sm:text-left'>
+                <div className='rounded-lg bg-blue-500/10 p-1.5 sm:p-2'>
+                  <Calendar className='h-3.5 w-3.5 sm:h-4 sm:w-4 text-blue-600' />
                 </div>
-
-                {/* Date From Filter */}
-                <div className='space-y-2'>
-                  <label className='text-sm font-medium'>From Date</label>
-                  <Input type='date' value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className='w-full' />
+                <div>
+                  <p className='text-xl sm:text-2xl font-bold'>{weekCount}</p>
+                  <p className='text-[10px] sm:text-xs text-muted-foreground'>This Week</p>
                 </div>
-
-                {/* Date To Filter */}
-                <div className='space-y-2'>
-                  <label className='text-sm font-medium'>To Date</label>
-                  <Input type='date' value={dateTo} onChange={(e) => setDateTo(e.target.value)} className='w-full' />
+              </CardContent>
+            </Card>
+            <Card className='animate-card-enter border-t-4 border-t-emerald-500/60 bg-linear-to-br from-emerald-500/5 via-background to-background'>
+              <CardContent className='pt-3 pb-3 px-3 sm:px-6 sm:pt-4 sm:pb-6 flex flex-col sm:flex-row items-center gap-1 sm:gap-3 text-center sm:text-left'>
+                <div className='rounded-lg bg-emerald-500/10 p-1.5 sm:p-2'>
+                  <Users className='h-3.5 w-3.5 sm:h-4 sm:w-4 text-emerald-600' />
                 </div>
-              </div>
-
-              {hasActiveFilters && (
-                <div className='mt-4 flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400'>
-                  <span>
-                    Showing {filteredVisits.length} of {scheduledVisits.length} scheduled visits
-                  </span>
+                <div>
+                  <p className='text-xl sm:text-2xl font-bold'>{monthCount}</p>
+                  <p className='text-[10px] sm:text-xs text-muted-foreground'>This Month</p>
                 </div>
-              )}
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
         )}
 
+        {/* ── Compact inline filters (admins only) ──────────────────────────── */}
+        {canSeeAllSchedules && !loading && (
+          <div className='grid grid-cols-2 sm:flex sm:flex-wrap sm:items-center gap-2'>
+            <Select value={selectedTechnician} onValueChange={setSelectedTechnician}>
+              <SelectTrigger className='h-8 w-full sm:w-44 text-sm'>
+                <SelectValue placeholder='All Technicians' />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='all'>All Technicians</SelectItem>
+                {technicians.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={selectedCustomer} onValueChange={setSelectedCustomer}>
+              <SelectTrigger className='h-8 w-full sm:w-44 text-sm'>
+                <SelectValue placeholder='All Customers' />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='all'>All Customers</SelectItem>
+                {uniqueCustomers.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Input type='date' value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className='h-8 w-full sm:w-36 text-sm' />
+            <Input type='date' value={dateTo} onChange={(e) => setDateTo(e.target.value)} className='h-8 w-full sm:w-36 text-sm' />
+            {hasActiveFilters && (
+              <Button variant='ghost' size='sm' onClick={clearFilters} className='h-8 gap-1.5 text-muted-foreground'>
+                <X className='h-3.5 w-3.5' />
+                Clear
+                <Badge variant='secondary' className='ml-0.5 h-4 px-1.5 text-xs'>
+                  {filteredVisits.length} / {scheduledVisits.length}
+                </Badge>
+              </Button>
+            )}
+          </div>
+        )}
+
+        {/* ── Loading skeleton ───────────────────────────────────────────────── */}
         {loading ? (
           <div className='space-y-4'>
-            <Skeleton className='h-12 w-full' />
-            <Skeleton className='h-96 w-full' />
+            <div className='grid grid-cols-3 gap-3'>
+              {[0, 1, 2].map((i) => (
+                <Skeleton key={i} className='h-20 rounded-xl' />
+              ))}
+            </div>
+            <div className='flex gap-2'>
+              <Skeleton className='h-9 w-32 rounded-md' />
+              <Skeleton className='h-9 w-28 rounded-md' />
+            </div>
+            <div className='rounded-xl border overflow-hidden'>
+              <div className='grid grid-cols-7 bg-muted/50'>
+                {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+                  <div key={i} className='h-9 flex items-center justify-center'>
+                    <Skeleton className='h-3 w-5' />
+                  </div>
+                ))}
+              </div>
+              <div className='grid grid-cols-7 divide-x divide-y divide-border'>
+                {Array.from({ length: 35 }).map((_, i) => (
+                  <div key={i} className='min-h-24 p-1.5 space-y-1'>
+                    <Skeleton className='h-3 w-4' />
+                    {[3, 8, 15, 22].includes(i) && <Skeleton className='h-4 w-full rounded' />}
+                    {[10, 18].includes(i) && (
+                      <>
+                        <Skeleton className='h-4 w-full rounded' />
+                        <Skeleton className='h-4 w-3/4 rounded' />
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         ) : (
           <Tabs defaultValue='calendar' className='w-full'>
-            <TabsList>
+            <TabsList className='mb-1'>
               <TabsTrigger value='calendar' className='gap-2'>
                 <Calendar className='h-4 w-4' />
-                Calendar View
+                Calendar
               </TabsTrigger>
               <TabsTrigger value='list' className='gap-2'>
                 <List className='h-4 w-4' />
-                List View
+                Timeline
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value='calendar' className='space-y-4'>
-              <Card>
-                <CardHeader>
-                  <div className='flex items-center justify-between'>
-                    <CardTitle>{monthName}</CardTitle>
-                    <div className='flex gap-2'>
-                      <Button variant='outline' size='sm' onClick={previousMonth}>
-                        <ChevronLeft className='h-4 w-4' />
-                      </Button>
-                      <Button variant='outline' size='sm' onClick={() => setCurrentMonth(new Date())}>
-                        Today
-                      </Button>
-                      <Button variant='outline' size='sm' onClick={nextMonth}>
-                        <ChevronRight className='h-4 w-4' />
-                      </Button>
+            {/* ── Calendar tab ───────────────────────────────────────────────── */}
+            <TabsContent value='calendar' className='mt-3 data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:slide-in-from-bottom-2 data-[state=active]:duration-200'>
+              <div className='flex items-center justify-between mb-3'>
+                <h2 className='text-lg font-semibold'>{monthName}</h2>
+                <div className='flex gap-2'>
+                  <Button variant='outline' size='sm' onClick={previousMonth}>
+                    <ChevronLeft className='h-4 w-4' />
+                  </Button>
+                  <Button variant='outline' size='sm' onClick={() => setCurrentMonth(new Date())}>
+                    Today
+                  </Button>
+                  <Button variant='outline' size='sm' onClick={nextMonth}>
+                    <ChevronRight className='h-4 w-4' />
+                  </Button>
+                </div>
+              </div>
+              <div className='rounded-xl overflow-hidden border border-border'>
+                <div className='grid grid-cols-7 bg-muted/60'>
+                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
+                    <div key={d} className='py-2.5 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide'>
+                      <span className='sm:hidden'>{d[0]}</span>
+                      <span className='hidden sm:inline'>{d}</span>
                     </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className='grid grid-cols-7 gap-px bg-slate-200 dark:bg-slate-700 rounded-lg overflow-hidden'>
-                    {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
-                      <div key={day} className='bg-slate-100 dark:bg-slate-800 p-2 text-center text-sm font-semibold'>
-                        {day}
-                      </div>
-                    ))}
-                    {calendarDays}
-                  </div>
-
-                  {upcomingVisits.length === 0 && <div className='text-center py-8 text-slate-500'>No scheduled visits found. Check back later!</div>}
-                </CardContent>
-              </Card>
+                  ))}
+                </div>
+                <div className='grid grid-cols-7 divide-x divide-y divide-border/70'>{calendarDays}</div>
+              </div>
+              {filteredVisits.length === 0 && (
+                <div className='text-center py-10 text-muted-foreground mt-4'>
+                  <CalendarDays className='h-10 w-10 mx-auto mb-2 opacity-20' />
+                  <p>No scheduled visits found.</p>
+                </div>
+              )}
             </TabsContent>
 
-            <TabsContent value='list' className='space-y-4'>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Upcoming Visits ({upcomingVisits.length})</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {upcomingVisits.length === 0 ? (
-                    <div className='text-center py-8 text-slate-500'>No upcoming scheduled visits. Enjoy your free time!</div>
-                  ) : (
-                    <div className='space-y-4'>
-                      {upcomingVisits.map((visit) => (
-                        <Card key={visit.id} className='border-l-4 border-l-amber-400'>
-                          <CardContent className='p-4'>
-                            <div className='flex items-start justify-between mb-3'>
-                              <div>
-                                <h3 className='font-semibold text-lg'>{visit.ticketNumber}</h3>
-                                <div className='flex gap-2 mt-1'>
-                                  <Badge variant='outline'>{visit.status}</Badge>
-                                  {canSeeAllSchedules && visit.assignedToName && (
-                                    <Badge variant='secondary' className='bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'>
-                                      {visit.assignedToName}
-                                    </Badge>
-                                  )}
-                                </div>
-                              </div>
-                              <div className='text-right'>
-                                <div className='flex items-center gap-2 text-amber-600 dark:text-amber-400 font-semibold'>
-                                  <Clock className='h-4 w-4' />
-                                  {visit.scheduledVisitDate.toLocaleString('en-US', {
-                                    month: 'short',
-                                    day: 'numeric',
-                                    year: 'numeric',
-                                    hour: 'numeric',
-                                    minute: '2-digit',
-                                    hour12: true,
-                                  })}
-                                </div>
-                              </div>
-                            </div>
+            {/* ── Timeline tab ───────────────────────────────────────────────── */}
+            <TabsContent value='list' className='mt-3 data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:slide-in-from-bottom-2 data-[state=active]:duration-200'>
+              <div className='flex items-center gap-2 mb-5'>
+                <h2 className='text-lg font-semibold'>{_today.toLocaleString('default', { month: 'long', year: 'numeric' })}</h2>
+                <Badge variant='secondary'>{upcomingVisits.length} upcoming</Badge>
+                {hasActiveFilters && (
+                  <Badge variant='outline' className='text-xs'>
+                    filtered
+                  </Badge>
+                )}
+              </div>
 
-                            {visit.customerInfo && (
-                              <div className='grid md:grid-cols-2 gap-4 mb-3'>
-                                <div>
-                                  <h4 className='text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2'>Customer Details</h4>
-                                  <div className='space-y-1 text-sm'>
-                                    <p className='font-medium'>{visit.customerInfo.companyName}</p>
-                                    <p className='text-slate-600 dark:text-slate-400'>Contact: {visit.customerInfo.contactPerson}</p>
-                                    <p className='text-slate-600 dark:text-slate-400'>Phone: {visit.customerInfo.phone}</p>
-                                    <div className='flex items-start gap-1 text-slate-600 dark:text-slate-400'>
-                                      <MapPin className='h-4 w-4 mt-0.5 shrink-0' />
-                                      <span>{visit.customerInfo.address}</span>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                <div>
-                                  <h4 className='text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2'>Ticket Details</h4>
-                                  <div className='space-y-1 text-sm'>
-                                    <p className='text-slate-600 dark:text-slate-400'>
-                                      <span className='font-medium'>Issue:</span> {visit.issueDescription}
-                                    </p>
-                                    <div className='flex items-start gap-1 text-slate-600 dark:text-slate-400'>
-                                      <Wrench className='h-4 w-4 mt-0.5 shrink-0' />
-                                      <div>
-                                        <span className='font-medium'>Machines:</span>
-                                        <ul className='ml-2 mt-1'>
-                                          {visit.machines.map((machine, idx) => (
-                                            <li key={idx}>
-                                              {machine.machineType} - {machine.serialNumber} ({machine.priority} priority)
-                                            </li>
-                                          ))}
-                                        </ul>
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-
-                            {visit.additionalNotes && (
-                              <div className='mt-3 p-2 bg-slate-50 dark:bg-slate-900 rounded border border-slate-200 dark:border-slate-700'>
-                                <p className='text-sm text-slate-600 dark:text-slate-400'>
-                                  <span className='font-medium'>Notes:</span> {visit.additionalNotes}
-                                </p>
-                              </div>
-                            )}
-
-                            <div className='mt-3 flex gap-2'>
-                              <Button variant='outline' size='sm' onClick={() => router.push(`/tickets?id=${visit.id}`)}>
-                                View Full Ticket
-                              </Button>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+              {visitsByDay.length === 0 ? (
+                <div className='text-center py-16 text-muted-foreground'>
+                  <CalendarDays className='h-12 w-12 mx-auto mb-3 opacity-20' />
+                  <p className='font-medium'>No upcoming visits scheduled</p>
+                  <p className='text-sm mt-1'>Enjoy the downtime!</p>
+                </div>
+              ) : (
+                <div>
+                  {visitsByDay.map(({ date, visits }, groupIdx) => {
+                    const isDateToday = sameDay(date, _today);
+                    return (
+                      <div key={date.toDateString()} className={groupIdx > 0 ? 'mt-7' : ''}>
+                        <div className='flex items-center gap-3 mb-3'>
+                          <div className={`flex flex-col items-center justify-center w-11 h-11 rounded-xl shrink-0 ${isDateToday ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground'}`}>
+                            <span className='text-xs font-semibold uppercase leading-tight'>{date.toLocaleDateString('en-US', { weekday: 'short' })}</span>
+                            <span className='text-lg font-bold leading-tight'>{date.getDate()}</span>
+                          </div>
+                          <div>
+                            <p className='font-semibold text-sm'>
+                              {isDateToday && <span className='text-primary mr-1'>Today &mdash;</span>}
+                              {date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                            </p>
+                            <p className='text-xs text-muted-foreground'>
+                              {visits.length} {visits.length === 1 ? 'visit' : 'visits'} scheduled
+                            </p>
+                          </div>
+                          <div className='flex-1 h-px bg-border' />
+                        </div>
+                        <div className='ml-14 space-y-2'>
+                          {visits.map((visit) => (
+                            <VisitCard key={visit.id} visit={visit} />
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </TabsContent>
           </Tabs>
         )}
       </div>
 
-      {/* Date Modal for Mobile */}
+      {/* ── Date click modal ───────────────────────────────────────────────── */}
       <Dialog open={isDateModalOpen} onOpenChange={setIsDateModalOpen}>
-        <DialogContent className='max-h-[90vh] overflow-y-auto'>
+        <DialogContent className='max-h-[90dvh] overflow-y-auto sm:max-w-lg'>
           <DialogHeader>
-            <DialogTitle>{selectedDate ? selectedDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Scheduled Visits'}</DialogTitle>
+            <DialogTitle className='flex items-center gap-2'>
+              <CalendarDays className='h-4 w-4 text-primary' />
+              {selectedDate?.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+            </DialogTitle>
+            <DialogDescription className='sr-only'>Scheduled visits for the selected date</DialogDescription>
           </DialogHeader>
-          <div className='space-y-4'>
+          <div className='space-y-3 mt-2'>
             {selectedDate && getVisitsForDate(selectedDate).length === 0 ? (
-              <div className='text-center py-8 text-slate-500'>No scheduled visits for this date</div>
+              <div className='text-center py-8 text-muted-foreground'>
+                <Calendar className='h-8 w-8 mx-auto mb-2 opacity-30' />
+                <p>No scheduled visits for this date</p>
+              </div>
             ) : (
-              selectedDate &&
-              getVisitsForDate(selectedDate).map((visit) => (
-                <Card key={visit.id} className='border-l-4 border-l-amber-400'>
-                  <CardContent className='p-4'>
-                    <div className='space-y-4'>
-                      {/* Header */}
-                      <div className='flex items-start justify-between gap-2'>
-                        <div>
-                          <h3 className='font-semibold text-base'>{visit.ticketNumber}</h3>
-                          <div className='flex gap-2 mt-1 flex-wrap'>
-                            <Badge variant='outline' className='text-xs'>
-                              {visit.status}
-                            </Badge>
-                            {canSeeAllSchedules && visit.assignedToName && (
-                              <Badge variant='secondary' className='bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 text-xs'>
-                                {visit.assignedToName}
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                        <div className='text-right'>
-                          <div className='flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold text-sm'>
-                            <Clock className='h-4 w-4' />
-                            {visit.scheduledVisitDate.toLocaleTimeString('en-US', {
-                              hour: 'numeric',
-                              minute: '2-digit',
-                              hour12: true,
-                            })}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Customer Info */}
-                      {visit.customerInfo && (
-                        <div className='space-y-2'>
-                          <h4 className='text-sm font-semibold text-slate-700 dark:text-slate-300'>Customer</h4>
-                          <div className='space-y-1 text-sm'>
-                            <p className='font-medium'>{visit.customerInfo.companyName}</p>
-                            <p className='text-slate-600 dark:text-slate-400'>Contact: {visit.customerInfo.contactPerson}</p>
-                            <p className='text-slate-600 dark:text-slate-400'>Phone: {visit.customerInfo.phone}</p>
-                            <div className='flex items-start gap-1 text-slate-600 dark:text-slate-400'>
-                              <MapPin className='h-4 w-4 mt-0.5 shrink-0' />
-                              <span>{visit.customerInfo.address}</span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Issue */}
-                      <div className='space-y-2'>
-                        <h4 className='text-sm font-semibold text-slate-700 dark:text-slate-300'>Issue</h4>
-                        <p className='text-sm text-slate-600 dark:text-slate-400'>{visit.issueDescription}</p>
-                      </div>
-
-                      {/* Machines */}
-                      <div className='space-y-2'>
-                        <h4 className='text-sm font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1'>
-                          <Wrench className='h-4 w-4' />
-                          Machines
-                        </h4>
-                        <div className='space-y-1 text-sm'>
-                          {visit.machines.map((machine, idx) => (
-                            <div key={idx} className='bg-slate-50 dark:bg-slate-900 p-2 rounded'>
-                              <p className='font-medium'>{machine.machineType}</p>
-                              <p className='text-slate-600 dark:text-slate-400'>Serial: {machine.serialNumber}</p>
-                              <p className='text-slate-600 dark:text-slate-400'>Priority: {machine.priority}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Notes */}
-                      {visit.additionalNotes && (
-                        <div className='space-y-2'>
-                          <h4 className='text-sm font-semibold text-slate-700 dark:text-slate-300'>Notes</h4>
-                          <p className='text-sm text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-900 p-2 rounded'>{visit.additionalNotes}</p>
-                        </div>
-                      )}
-
-                      {/* View Link */}
-                      <Button
-                        variant='outline'
-                        size='sm'
-                        onClick={() => {
-                          router.push(`/tickets?id=${visit.id}`);
-                          setIsDateModalOpen(false);
-                        }}
-                        className='w-full gap-2'
-                      >
-                        <Eye className='h-4 w-4' />
-                        View Full Ticket
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))
+              selectedDate && getVisitsForDate(selectedDate).map((visit) => <VisitCard key={visit.id} visit={visit} />)
             )}
           </div>
         </DialogContent>

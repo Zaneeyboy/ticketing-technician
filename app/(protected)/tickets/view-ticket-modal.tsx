@@ -84,28 +84,28 @@ export function ViewTicketModal({ open, onOpenChange, ticket }: ViewTicketModalP
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'Open':
-        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200';
+        return 'bg-amber-500/15 text-amber-700 dark:text-amber-400';
       case 'Assigned':
-        return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
+        return 'bg-primary/10 text-primary dark:bg-primary/15';
       case 'Closed':
-        return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
+        return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400';
       default:
-        return 'bg-slate-100 text-slate-800 dark:bg-slate-900 dark:text-slate-200';
+        return 'bg-muted text-muted-foreground';
     }
   };
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
       case 'Urgent':
-        return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200';
+        return 'bg-red-500/15 text-red-700 dark:text-red-400';
       case 'High':
-        return 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200';
+        return 'bg-orange-500/15 text-orange-700 dark:text-orange-400';
       case 'Medium':
-        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200';
+        return 'bg-amber-500/15 text-amber-700 dark:text-amber-400';
       case 'Low':
-        return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
+        return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400';
       default:
-        return 'bg-slate-100 text-slate-800 dark:bg-slate-900 dark:text-slate-200';
+        return 'bg-muted text-muted-foreground';
     }
   };
 

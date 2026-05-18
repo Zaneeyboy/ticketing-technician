@@ -6,7 +6,7 @@ import UsersClient from './users-client';
 export const dynamic = 'force-dynamic';
 
 export default async function UsersPage() {
-  const user = await requireRole(['admin', 'call_admin']);
+  const user = await requireRole(['store_admin']);
 
   if (!user) {
     redirect('/dashboard');

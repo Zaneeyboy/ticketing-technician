@@ -1,13 +1,64 @@
 import { z } from 'zod';
 
+// Invitation schemas
+export const inviteUserSchema = z.object({
+  name: z.string().min(2, 'Name is required'),
+  email: z.string().email('Invalid email address'),
+  role: z.enum(['store_admin', 'call_admin', 'technician', 'manager']),
+  storeId: z.string().nullable().optional(),
+});
+
+export const acceptInvitationSchema = z.object({
+  token: z.string().min(64, 'Invalid token'),
+  name: z.string().min(2, 'Name is required'),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+});
+
 // User schemas
-export const userRoleSchema = z.enum(['admin', 'call_admin', 'technician', 'management']);
+export const userRoleSchema = z.enum(['super_admin', 'manager', 'store_admin', 'call_admin', 'technician']);
 
 export const createUserSchema = z.object({
   email: z.string().email('Invalid email address'),
   password: z.string().min(6, 'Password must be at least 6 characters'),
   name: z.string().min(2, 'Name must be at least 2 characters'),
   role: userRoleSchema,
+  storeId: z.string().nullable().default(null),
+});
+
+// Store schemas
+export const storeModulesSchema = z.object({
+  tickets: z.boolean().default(true),
+  customers: z.boolean().default(true),
+  machines: z.boolean().default(true),
+  parts: z.boolean().default(true),
+  reports: z.boolean().default(true),
+});
+
+export const storeSettingsSchema = z.object({
+  timezone: z.string().min(1, 'Timezone is required'),
+  currency: z.string().min(1, 'Currency is required'),
+  locale: z.string().min(1, 'Locale is required'),
+});
+
+export const createStoreSchema = z.object({
+  name: z.string().min(2, 'Store name is required'),
+  island: z.string().min(2, 'Island is required'),
+  address: z.string().min(5, 'Address is required'),
+  contactEmail: z.string().email('Invalid email'),
+  contactPhone: z.string().min(7, 'Valid phone required'),
+  // No 'type' field — all stores are operational branches
+  status: z.enum(['active', 'inactive', 'onboarding']).default('onboarding'),
+  modules: storeModulesSchema.default({ tickets: true, customers: true, machines: true, parts: true, reports: true }),
+  settings: storeSettingsSchema.default({ timezone: 'America/Port_of_Spain', currency: 'TTD', locale: 'en-TT' }),
+});
+
+export const updateStoreSchema = createStoreSchema.partial();
+
+// Store admin onboarding — creates store + sends invitation to initial store_admin
+export const onboardStoreSchema = z.object({
+  store: createStoreSchema,
+  adminName: z.string().min(2, 'Admin name is required'),
+  adminEmail: z.string().email('Invalid email'),
 });
 
 // Customer schemas
@@ -22,7 +73,13 @@ export const createCustomerSchema = z.object({
 export const updateCustomerSchema = createCustomerSchema.partial();
 
 // Machine schemas
-export const machineTypeSchema = z.enum(['Crescendo', 'Espresso', 'Grinder', 'Other']);
+export const machineTypeSchema = z.string().min(1, 'Machine type is required');
+
+export const machinePartSchema = z.object({
+  partId: z.string().optional(),
+  partName: z.string().min(1, 'Part name is required'),
+  addedAt: z.date(),
+});
 
 export const createMachineSchema = z.object({
   customerId: z.string().min(1, 'Customer is required'),
@@ -31,6 +88,7 @@ export const createMachineSchema = z.object({
   installationDate: z.date().optional(),
   location: z.string().optional(),
   notes: z.string().optional(),
+  associatedParts: z.array(machinePartSchema).optional(),
 });
 
 export const updateMachineSchema = createMachineSchema.partial().extend({
@@ -66,7 +124,7 @@ export const maintenanceRecommendationSchema = z.object({
 // Multi-machine ticket support
 export const ticketMachineSchema = z.object({
   machineId: z.string().min(1, 'Machine ID is required'),
-  machineType: z.enum(['Crescendo', 'Espresso', 'Grinder', 'Other']),
+  machineType: z.string().min(1, 'Machine type is required'),
   serialNumber: z.string().min(1, 'Serial number is required'),
   customerId: z.string().min(1, 'Customer ID is required'),
   customerName: z.string().min(1, 'Customer name is required'),
@@ -75,20 +133,38 @@ export const ticketMachineSchema = z.object({
 
 export const createTicketSchema = z.object({
   machines: z.array(ticketMachineSchema).min(1, 'At least one machine is required'),
+  briefDescription: z.string().max(120, 'Brief description must be 120 characters or less').optional(),
   issueDescription: z.string().min(10, 'Please provide a detailed description'),
+  internalNotes: z.string().optional(),
+  // Legacy — still accepted for backwards compat
+  additionalNotes: z.string().optional(),
   contactPerson: z.string().min(2, 'Contact person is required'),
   assignedTo: z.string().optional(),
   scheduledVisitDate: z.date().optional(),
-  additionalNotes: z.string().optional(),
 });
 
 export const updateTicketSchema = z.object({
   assignedTo: z.string().optional(),
+  briefDescription: z.string().max(120).optional(),
   issueDescription: z.string().min(10).optional(),
-  contactPerson: z.string().min(2).optional(),
+  internalNotes: z.string().optional(),
   additionalNotes: z.string().optional(),
+  contactPerson: z.string().min(2).optional(),
   status: ticketStatusSchema.optional(),
   scheduledVisitDate: z.date().nullable().optional(),
+});
+
+// Closure checklist schema
+export const closureChecklistItemSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  checked: z.boolean(),
+});
+
+// Customer sign-off schema
+export const customerSignOffSchema = z.object({
+  signedByName: z.string().min(2, 'Customer name is required'),
+  signatureDataUrl: z.string().min(10, 'Signature is required'),
 });
 
 export const technicianUpdateSchema = z.object({

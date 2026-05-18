@@ -42,10 +42,14 @@ const toIsoString = (value: any) => {
   return null;
 };
 
-const getCachedWorkLogsForTicket = (ticketId: string) =>
+function storeCol(storeId: string, col: string) {
+  return adminDb.collection('stores').doc(storeId).collection(col);
+}
+
+const getCachedWorkLogsForTicket = (storeId: string, ticketId: string) =>
   unstable_cache(
     async () => {
-      const snapshot = await adminDb.collection('machineWorkLogs').where('ticketId', '==', ticketId).get();
+      const snapshot = await storeCol(storeId, 'machineWorkLogs').where('ticketId', '==', ticketId).get();
       return snapshot.docs.map((doc) => {
         const data = doc.data();
         return {
@@ -77,11 +81,11 @@ const getCachedWorkLogsForTicket = (ticketId: string) =>
 export async function getWorkLogsForTicket(ticketId: string) {
   try {
     const user = await getCurrentUser();
-    if (!user || !['admin', 'call_admin', 'management', 'technician'].includes(user.role)) {
+    if (!user?.storeId) {
       return { success: false, error: 'Unauthorized', logs: [] as WorkLogEntry[] };
     }
 
-    const logs = await getCachedWorkLogsForTicket(ticketId)();
+    const logs = await getCachedWorkLogsForTicket(user.storeId, ticketId)();
     return { success: true, logs };
   } catch (error: any) {
     console.error('Error fetching work logs:', error);

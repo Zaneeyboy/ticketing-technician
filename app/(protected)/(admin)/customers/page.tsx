@@ -3,6 +3,8 @@ import DashboardLayout from '@/components/dashboard-layout';
 import { requireRole } from '@/lib/auth/role-guard';
 import { getCustomers } from '@/lib/actions/customers';
 import { CustomersTable } from './customers-table';
+import { PageHeader } from '@/components/page-header';
+import { Building2 } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -13,17 +15,14 @@ export const metadata: Metadata = {
 };
 
 export default async function CustomersPage() {
-  await requireRole(['admin', 'call_admin', 'management']);
+  await requireRole(['store_admin', 'store_manager', 'call_admin']);
 
   const customers = await getCustomers();
 
   return (
     <DashboardLayout>
       <div className='space-y-6'>
-        <div>
-          <p className='text-slate-600 dark:text-slate-400'>Manage customer information</p>
-        </div>
-
+        <PageHeader title='Customers' description='Manage customer accounts and contact information' icon={Building2} />
         <CustomersTable initialData={customers} />
       </div>
     </DashboardLayout>

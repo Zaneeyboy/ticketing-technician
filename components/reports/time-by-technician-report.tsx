@@ -12,6 +12,31 @@ import { useReportData } from '@/components/reports/report-data-provider';
 import type { ReportFilters as ReportFiltersState, ReportWorkLog } from '@/lib/types/reporting';
 import { formatDate } from '@/lib/utils';
 import { ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
+import { ExportButton } from '@/components/export-button';
+import { buildReportMetadata, type ExportColumn } from '@/lib/export';
+
+const TECHNICIAN_EXPORT_COLUMNS: ExportColumn[] = [
+  { header: 'Technician', key: 'technician' },
+  { header: 'Date', key: 'date' },
+  { header: 'Ticket #', key: 'ticketNumber' },
+  { header: 'Customer', key: 'customer' },
+  { header: 'Machine Type', key: 'machineType' },
+  { header: 'Serial #', key: 'serialNumber' },
+  { header: 'Hours', key: 'hours' },
+  { header: 'Work Performed', key: 'workPerformed' },
+  { header: 'Outcome', key: 'outcome' },
+  { header: 'Parts Used', key: 'partsUsed' },
+];
+
+const TECHNICIAN_SUMMARY_EXPORT_COLUMNS: ExportColumn[] = [
+  { header: 'Technician', key: 'technicianName' },
+  { header: 'Visits Completed', key: 'completedCount' },
+  { header: 'Visits Scheduled', key: 'scheduledCount' },
+  { header: 'Visits Missed', key: 'missedCount' },
+  { header: 'Visit Rate (%)', key: 'visitRate' },
+  { header: 'Total Hours', key: 'totalHours' },
+  { header: 'Avg Hours / Visit', key: 'avgHours' },
+];
 
 const DEFAULT_FILTERS: ReportFiltersState = {
   statuses: [],
@@ -126,20 +151,85 @@ export function TimeByTechnicianReport() {
     });
 
     const rows = Array.from(technicianAggregates.values())
-      .map((aggregate) => ({
-        ...aggregate,
-        customers: Array.from(aggregate.customerHours.entries())
-          .map(([customerId, hours]) => ({
-            customerId,
-            customerName: customerMap.get(customerId)?.companyName || 'Unknown',
-            hours,
-          }))
-          .sort((a, b) => b.hours - a.hours),
-      }))
+      .map((aggregate) => {
+        // Compute scheduled visits: tickets assigned to this tech with scheduledVisitDate in range
+        const scheduledCount = data.tickets.filter((t) => {
+          if (t.assignedTo !== aggregate.technicianId) return false;
+          if (filters.technicianIds.length > 0 && !filters.technicianIds.includes(aggregate.technicianId)) return false;
+          return matchesDate(t.scheduledVisitDate);
+        }).length;
+
+        const completedCount = aggregate.ticketIds.size;
+        // Missed = scheduled but no work log recorded in range for that ticket
+        const missedCount = Math.max(0, scheduledCount - completedCount);
+        const visitRate = scheduledCount > 0 ? Math.round((completedCount / scheduledCount) * 100) : null;
+        const avgHours = completedCount > 0 ? aggregate.totalHours / completedCount : 0;
+
+        return {
+          ...aggregate,
+          scheduledCount,
+          completedCount,
+          missedCount,
+          visitRate,
+          avgHours,
+          customers: Array.from(aggregate.customerHours.entries())
+            .map(([customerId, hours]) => ({
+              customerId,
+              customerName: customerMap.get(customerId)?.companyName || 'Unknown',
+              hours,
+            }))
+            .sort((a, b) => b.hours - a.hours),
+        };
+      })
       .sort((a, b) => b.totalHours - a.totalHours);
 
     return { rows, totalHours: hoursTotal };
   }, [data, filters, machineMap, customerMap, technicianMap, ticketMap, partsCategoryMap]);
+
+  const exportRows = useMemo(
+    () =>
+      rows.flatMap((row) =>
+        row.logs.map((log) => {
+          const machine = machineMap.get(log.machineId);
+          return {
+            technician: row.technicianName,
+            date: log.logDate ? new Date(log.logDate).toLocaleDateString('en-TT') : '',
+            ticketNumber: log.ticketNumber,
+            customer: log.customerName,
+            machineType: machine?.type ?? '',
+            serialNumber: machine?.serialNumber ?? '',
+            hours: log.hoursWorked?.toFixed(2) ?? '0.00',
+            workPerformed: log.workPerformed ?? '',
+            outcome: log.outcome ?? '',
+            partsUsed: log.partsUsed?.map((p) => `${p.partName} ×${p.quantity}`).join(', ') ?? '',
+          };
+        }),
+      ),
+    [rows, machineMap],
+  );
+
+  const summaryExportRows = useMemo(
+    () =>
+      rows.map((row) => ({
+        technicianName: row.technicianName,
+        completedCount: row.completedCount,
+        scheduledCount: row.scheduledCount,
+        missedCount: row.missedCount,
+        visitRate: row.visitRate !== null ? `${row.visitRate}%` : '—',
+        totalHours: row.totalHours.toFixed(2),
+        avgHours: row.avgHours.toFixed(2),
+      })),
+    [rows],
+  );
+
+  const exportMetadata = useMemo(
+    () =>
+      buildReportMetadata('Time by Technician Report', filters, {
+        technicians: data.technicians,
+        customers: data.customers,
+      }),
+    [filters, data.technicians, data.customers],
+  );
 
   const router = useRouter();
   const [expandedTechnicians, setExpandedTechnicians] = useState<Set<string>>(new Set());
@@ -159,11 +249,20 @@ export function TimeByTechnicianReport() {
 
   return (
     <div className='space-y-6'>
-      <div className='flex items-center gap-2'>
+      <div className='flex items-center justify-between gap-2'>
         <Button variant='outline' size='sm' onClick={() => router.back()} className='gap-2'>
           <ArrowLeft className='h-4 w-4' />
           Back
         </Button>
+        <ExportButton
+          data={exportRows}
+          columns={TECHNICIAN_EXPORT_COLUMNS}
+          filename={`time-by-technician-${filters.startDate ?? 'all'}-to-${filters.endDate ?? 'all'}`}
+          sheetName='Time by Technician'
+          title='Time by Technician Report'
+          subtitle={exportMetadata.subtitle}
+          metadata={exportMetadata}
+        />
       </div>
 
       <ReportFilters filters={filters} onChange={setFilters} onResetAll={() => setFilters(DEFAULT_FILTERS)} technicians={data.technicians} customers={data.customers} parts={data.parts} />
@@ -187,24 +286,19 @@ export function TimeByTechnicianReport() {
         </Card>
         <Card>
           <CardHeader className='pb-2'>
-            <CardTitle className='text-sm text-muted-foreground'>Avg Hours/Tech</CardTitle>
+            <CardTitle className='text-sm text-muted-foreground'>Visits Completed</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className='text-2xl font-semibold'>{rows.length > 0 ? (totalHours / rows.length).toFixed(1) : '0.0'}h</div>
+            <div className='text-2xl font-semibold'>{rows.reduce((s, r) => s + r.completedCount, 0)}</div>
           </CardContent>
         </Card>
         <Card>
           <CardHeader className='pb-2'>
-            <CardTitle className='text-sm text-muted-foreground'>Avg Hours/Ticket</CardTitle>
+            <CardTitle className='text-sm text-muted-foreground'>Scheduled Visits</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className='text-2xl font-semibold'>
-              {(() => {
-                const totalTickets = rows.reduce((sum, row) => sum + row.ticketIds.size, 0);
-                return totalTickets > 0 ? (totalHours / totalTickets).toFixed(1) : '0.0';
-              })()}
-              h
-            </div>
+            <div className='text-2xl font-semibold'>{rows.reduce((s, r) => s + r.scheduledCount, 0)}</div>
+            {rows.reduce((s, r) => s + r.missedCount, 0) > 0 && <p className='text-xs text-muted-foreground mt-0.5'>{rows.reduce((s, r) => s + r.missedCount, 0)} missed</p>}
           </CardContent>
         </Card>
       </div>
@@ -220,8 +314,10 @@ export function TimeByTechnicianReport() {
                 <TableRow>
                   <TableHead>Technician</TableHead>
                   <TableHead className='text-right'>Total Hours</TableHead>
-                  <TableHead className='text-right'>Tickets</TableHead>
-                  <TableHead className='text-right'>Avg Hrs/Ticket</TableHead>
+                  <TableHead className='text-right'>Visits Done</TableHead>
+                  <TableHead className='text-right'>Scheduled</TableHead>
+                  <TableHead className='text-right'>Missed</TableHead>
+                  <TableHead className='text-right'>Visit Rate</TableHead>
                   <TableHead className='text-right'>Customers</TableHead>
                   <TableHead className='text-right'>Insights</TableHead>
                   <TableHead className='text-right'>Details</TableHead>
@@ -230,7 +326,7 @@ export function TimeByTechnicianReport() {
               <TableBody>
                 {rows.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={8} className='text-center text-sm text-muted-foreground'>
+                    <TableCell colSpan={9} className='text-center text-sm text-muted-foreground'>
                       No data found for the selected filters.
                     </TableCell>
                   </TableRow>
@@ -267,27 +363,46 @@ export function TimeByTechnicianReport() {
                           </div>
                         </TableCell>
                         <TableCell className='text-right'>
-                          <Badge variant='outline' className='bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'>
+                          <Badge variant='outline' className='bg-secondary/10 dark:bg-secondary/20 text-secondary border-secondary/30'>
                             {row.totalHours.toFixed(1)}h
                           </Badge>
                         </TableCell>
-                        <TableCell className='text-right'>{row.ticketIds.size}</TableCell>
+                        <TableCell className='text-right'>{row.completedCount}</TableCell>
+                        <TableCell className='text-right'>{row.scheduledCount}</TableCell>
                         <TableCell className='text-right'>
-                          <span className='text-muted-foreground'>{avgPerTicket.toFixed(1)}h</span>
+                          {row.missedCount > 0 ? <span className='text-destructive font-medium'>{row.missedCount}</span> : <span className='text-muted-foreground'>0</span>}
+                        </TableCell>
+                        <TableCell className='text-right'>
+                          {row.visitRate !== null ? (
+                            <Badge
+                              variant='outline'
+                              className={
+                                row.visitRate >= 80
+                                  ? 'bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/30'
+                                  : row.visitRate >= 60
+                                    ? 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/30'
+                                    : 'bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/30'
+                              }
+                            >
+                              {row.visitRate}%
+                            </Badge>
+                          ) : (
+                            <span className='text-muted-foreground text-xs'>—</span>
+                          )}
                         </TableCell>
                         <TableCell className='text-right'>{row.customers.length}</TableCell>
                         <TableCell className='text-right'>
                           <div className='flex items-center justify-end'>
                             {isBelowAverage ? (
-                              <Badge variant='outline' className='text-xs bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'>
+                              <Badge variant='outline' className='text-xs bg-secondary/10 dark:bg-secondary/20 text-secondary border-secondary/30'>
                                 {efficiencyRatio}% faster
                               </Badge>
                             ) : isAboveAverage ? (
-                              <Badge variant='outline' className='text-xs bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800'>
+                              <Badge variant='outline' className='text-xs bg-primary/10 dark:bg-primary/20 text-primary border-primary/30'>
                                 {Math.abs(Number(efficiencyRatio))}% slower
                               </Badge>
                             ) : (
-                              <Badge variant='outline' className='text-xs bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800'>
+                              <Badge variant='outline' className='text-xs bg-muted text-muted-foreground border-border'>
                                 Average
                               </Badge>
                             )}
@@ -300,7 +415,7 @@ export function TimeByTechnicianReport() {
                                 View
                               </Button>
                             </DialogTrigger>
-                            <DialogContent className='max-w-2xl lg:max-w-5xl max-h-[90vh] overflow-y-auto'>
+                            <DialogContent className='max-w-2xl lg:max-w-5xl max-h-[90vh] overflow-y-auto' aria-describedby={undefined}>
                               <DialogHeader>
                                 <DialogTitle>{row.technicianName} - Work Details</DialogTitle>
                               </DialogHeader>
@@ -311,16 +426,16 @@ export function TimeByTechnicianReport() {
                                     <div className='text-lg font-semibold'>{row.totalHours.toFixed(1)}h</div>
                                   </div>
                                   <div>
-                                    <div className='text-xs text-muted-foreground'>Tickets</div>
-                                    <div className='text-lg font-semibold'>{row.ticketIds.size}</div>
+                                    <div className='text-xs text-muted-foreground'>Visits Done</div>
+                                    <div className='text-lg font-semibold'>{row.completedCount}</div>
                                   </div>
                                   <div>
-                                    <div className='text-xs text-muted-foreground'>Avg Hrs/Ticket</div>
-                                    <div className='text-lg font-semibold'>{avgPerTicket.toFixed(1)}h</div>
+                                    <div className='text-xs text-muted-foreground'>Scheduled</div>
+                                    <div className='text-lg font-semibold'>{row.scheduledCount}</div>
                                   </div>
                                   <div>
-                                    <div className='text-xs text-muted-foreground'>Customers</div>
-                                    <div className='text-lg font-semibold'>{row.customers.length}</div>
+                                    <div className='text-xs text-muted-foreground'>Visit Rate</div>
+                                    <div className='text-lg font-semibold'>{row.visitRate !== null ? `${row.visitRate}%` : '—'}</div>
                                   </div>
                                 </div>
                                 <div>
@@ -348,9 +463,9 @@ export function TimeByTechnicianReport() {
                         ? [
                             <TableRow
                               key={`detail-${row.technicianId}`}
-                              className='bg-gradient-to-b from-primary/5 to-transparent border-l-4 border-primary/30 animate-in fade-in-0 slide-in-from-top-2 duration-300'
+                              className='bg-linear-to-b from-primary/5 to-transparent border-l-4 border-primary/30 animate-in fade-in-0 slide-in-from-top-2 duration-300'
                             >
-                              <TableCell colSpan={8} className='p-4'>
+                              <TableCell colSpan={9} className='p-4'>
                                 <div className='space-y-3 animate-in fade-in-0 duration-500'>
                                   <div>
                                     <h4 className='text-sm font-semibold flex items-center gap-2 mb-3'>

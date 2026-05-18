@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useAuth } from '@/lib/auth/auth-provider';
 import DashboardLayout from '@/components/dashboard-layout';
@@ -11,7 +11,27 @@ import { db } from '@/lib/firebase/client';
 import { Ticket } from '@/lib/types';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { AlarmClock, AlertTriangle, BarChart3, ClipboardList, FileText, PlusCircle, Settings, UserCheck, Users, Wrench } from 'lucide-react';
+import {
+  Activity,
+  AlarmClock,
+  AlertTriangle,
+  BarChart3,
+  CheckCircle2,
+  ChevronRight,
+  ClipboardList,
+  Clock,
+  FileText,
+  Package,
+  PlusCircle,
+  Settings,
+  TicketCheck,
+  TrendingUp,
+  UserCheck,
+  UserPlus,
+  Users,
+  Wrench,
+} from 'lucide-react';
+import { CountUp } from '@/components/ui/count-up';
 
 export default function DashboardPage() {
   const { user, loading: authLoading } = useAuth();
@@ -32,7 +52,7 @@ export default function DashboardPage() {
   });
   const [recentTickets, setRecentTickets] = useState<Ticket[]>([]);
   const [alerts, setAlerts] = useState<Array<{ title: string; description: string; tone: 'default' | 'warning' | 'danger' }>>([]);
-  const [recentWork, setRecentWork] = useState<Array<{ id: string; title: string; subtitle: string; time: string; status: string }>>([]);
+  const [recentWork, setRecentWork] = useState<Array<{ id: string; title: string; subtitle: string; rawDate: Date; status: string }>>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -43,7 +63,16 @@ export default function DashboardPage() {
 
   const loadDashboardData = async () => {
     try {
-      const ticketsRef = collection(db, 'tickets');
+      const storeId = user?.storeId;
+
+      // HQ users (super_admin, manager) don't have a storeId.
+      // The client SDK cannot fan-out across all stores, so bail early.
+      if (!storeId) {
+        setLoading(false);
+        return;
+      }
+
+      const ticketsRef = collection(db, 'stores', storeId, 'tickets');
 
       const toDateValue = (value: any) => {
         if (!value) return null;
@@ -225,8 +254,8 @@ export default function DashboardPage() {
         .map(({ ticket, updatedAt }) => ({
           id: ticket.id,
           title: ticket.ticketNumber,
-          subtitle: `${ticket.machines?.[0]?.customerName || 'Unknown'} • ${ticket.machines?.[0]?.machineType || 'Unknown'}`,
-          time: updatedAt.toLocaleString(),
+          subtitle: `${ticket.machines?.[0]?.customerName || 'Unknown'} â€¢ ${ticket.machines?.[0]?.machineType || 'Unknown'}`,
+          rawDate: updatedAt,
           status: ticket.status,
         }));
 
@@ -260,17 +289,17 @@ export default function DashboardPage() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'Open':
-        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200';
+        return 'bg-amber-500/15 text-amber-700 dark:text-amber-400';
       case 'Assigned':
-        return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
+        return 'bg-primary/10 text-primary dark:bg-primary/15';
       case 'Closed':
-        return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
+        return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400';
       default:
-        return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
+        return 'bg-muted text-muted-foreground';
     }
   };
 
-  const roleKey = user?.role === 'admin' ? 'management' : user?.role;
+  const roleKey = user?.role === 'store_admin' || user?.role === 'super_admin' ? 'management' : user?.role;
   const headerDescription =
     roleKey === 'technician'
       ? 'Focus on your assigned work and close tickets efficiently.'
@@ -281,302 +310,396 @@ export default function DashboardPage() {
   const statsCards =
     roleKey === 'technician'
       ? [
-          { title: 'My Open', value: stats.myOpen, subtitle: 'Awaiting work' },
-          { title: 'Assigned', value: stats.myAssigned, subtitle: 'Currently working' },
-          { title: 'Closed Today', value: stats.myClosedToday, subtitle: 'Completed today' },
-          { title: 'Total Assigned', value: stats.myTickets, subtitle: 'All time' },
+          { title: 'My Open', value: stats.myOpen, subtitle: 'Awaiting work', icon: AlarmClock },
+          { title: 'Assigned', value: stats.myAssigned, subtitle: 'Currently working', icon: ClipboardList },
+          { title: 'Closed Today', value: stats.myClosedToday, subtitle: 'Completed today', icon: TicketCheck },
+          { title: 'Total Assigned', value: stats.myTickets, subtitle: 'All time', icon: FileText },
         ]
       : roleKey === 'call_admin'
         ? [
-            { title: 'Created Today', value: stats.myCreatedToday, subtitle: 'New tickets logged' },
-            { title: 'Active Created', value: stats.myActiveCreated, subtitle: 'Still open' },
-            { title: 'Closed Today', value: stats.myClosedToday, subtitle: 'Resolved today' },
-            { title: 'Total Created', value: stats.myCreated, subtitle: 'All time' },
+            { title: 'Created Today', value: stats.myCreatedToday, subtitle: 'New tickets logged', icon: PlusCircle },
+            { title: 'Active Created', value: stats.myActiveCreated, subtitle: 'Still open', icon: AlarmClock },
+            { title: 'Closed Today', value: stats.myClosedToday, subtitle: 'Resolved today', icon: TicketCheck },
+            { title: 'Total Created', value: stats.myCreated, subtitle: 'All time', icon: FileText },
           ]
         : [
-            { title: 'Open Tickets', value: stats.openTickets, subtitle: 'Awaiting assignment' },
-            { title: 'Assigned', value: stats.assignedTickets, subtitle: 'Currently working' },
-            { title: 'Total Closed', value: stats.totalClosed, subtitle: 'All resolved' },
-            { title: 'Avg Resolution', value: `${stats.avgResolutionHours.toFixed(1)}h`, subtitle: 'Across closed tickets' },
+            { title: 'Open Tickets', value: stats.openTickets, subtitle: 'Awaiting assignment', icon: AlarmClock },
+            { title: 'Assigned', value: stats.assignedTickets, subtitle: 'Currently working', icon: ClipboardList },
+            { title: 'Total Closed', value: stats.totalClosed, subtitle: 'All resolved', icon: TicketCheck },
+            { title: 'Avg Resolution', value: `${stats.avgResolutionHours.toFixed(1)}h`, subtitle: 'Across closed tickets', icon: Clock },
           ];
 
   const quickLinks =
     roleKey === 'technician'
-      ? [{ href: '/tickets', label: 'My Tickets', icon: ClipboardList, helper: 'Assigned to you' }]
+      ? [{ href: '/tickets', label: 'My Tickets', description: 'View assigned work', icon: ClipboardList, accent: 'text-primary' }]
       : roleKey === 'call_admin'
         ? [
-            { href: '/tickets', label: 'Create Ticket', icon: PlusCircle, helper: 'Log a new request' },
-            { href: '/customers', label: 'Manage Customers', icon: Users, helper: 'Update customer info' },
-            { href: '/users', label: 'User Access', icon: FileText, helper: 'Manage logins' },
+            { href: '/tickets', label: 'Create Ticket', description: 'Log a new request', icon: PlusCircle, accent: 'text-primary' },
+            { href: '/customers', label: 'Customers', description: 'Verify contact info', icon: Users, accent: 'text-secondary' },
+            { href: '/users', label: 'User Access', description: 'Manage logins', icon: FileText, accent: 'text-accent' },
           ]
         : [
-            { href: '/reports', label: 'Reports', icon: BarChart3, helper: 'Trends and KPIs' },
-            { href: '/machines', label: 'Machines', icon: Wrench, helper: 'Fleet visibility' },
-            { href: '/parts', label: 'Parts Inventory', icon: Settings, helper: 'Spare parts status' },
-            { href: '/technicians', label: 'Technicians', icon: UserCheck, helper: 'Workload overview' },
-          ];
-
-  const kpiCards =
-    roleKey === 'technician'
-      ? [
-          { title: 'Assigned Today', value: stats.myAssigned, subtitle: 'Active assignments' },
-          { title: 'Open Queue', value: stats.myOpen, subtitle: 'Awaiting action' },
-          { title: 'Closed Today', value: stats.myClosedToday, subtitle: 'Completed today' },
-        ]
-      : roleKey === 'call_admin'
-        ? [
-            { title: 'Created Today', value: stats.myCreatedToday, subtitle: 'New intake' },
-            { title: 'Active Created', value: stats.myActiveCreated, subtitle: 'Still open' },
-            { title: 'Closed Today', value: stats.myClosedToday, subtitle: 'Resolved' },
-          ]
-        : [
-            { title: 'Closed Today', value: stats.closedToday, subtitle: 'Completed today' },
-            { title: 'Active Tickets', value: stats.openTickets + stats.assignedTickets, subtitle: 'Open + assigned' },
+            { href: '/users?action=invite', label: 'Add User', description: 'Invite a team member', icon: UserPlus, accent: 'text-primary' },
+            { href: '/customers', label: 'Add Customer', description: 'Register an account', icon: Users, accent: 'text-secondary' },
+            { href: '/machines', label: 'Add Machine', description: 'Register equipment', icon: Wrench, accent: 'text-accent' },
+            { href: '/parts', label: 'Import Parts', description: 'Bulk upload inventory', icon: Package, accent: 'text-primary' },
+            { href: '/technicians', label: 'Technicians', description: 'Manage the team', icon: UserCheck, accent: 'text-secondary' },
+            { href: '/reports', label: 'Reports', description: 'Trends and KPIs', icon: BarChart3, accent: 'text-accent' },
           ];
 
   const statCardStyles = [
-    'border-t-4 border-t-orange-500/70 bg-gradient-to-br from-orange-50/70 via-background to-background dark:from-orange-950/40',
-    'border-t-4 border-t-rose-500/70 bg-gradient-to-br from-rose-50/70 via-background to-background dark:from-rose-950/40',
-    'border-t-4 border-t-amber-500/70 bg-gradient-to-br from-amber-50/70 via-background to-background dark:from-amber-950/40',
-    'border-t-4 border-t-slate-500/70 bg-gradient-to-br from-slate-50/70 via-background to-background dark:from-slate-950/40',
+    'border-t-4 border-t-primary/70 bg-linear-to-br from-primary/8 via-background to-background dark:from-primary/15',
+    'border-t-4 border-t-secondary/70 bg-linear-to-br from-secondary/8 via-background to-background dark:from-secondary/15',
+    'border-t-4 border-t-accent/70 bg-linear-to-br from-accent/8 via-background to-background dark:from-accent/15',
+    'border-t-4 border-t-primary/40 bg-linear-to-br from-muted/60 via-background to-background dark:from-muted/30',
   ];
 
-  const kpiCardStyles = [
-    'border border-orange-100/80 dark:border-orange-900/40 bg-gradient-to-br from-orange-50/50 via-background to-background dark:from-orange-950/30',
-    'border border-rose-100/80 dark:border-rose-900/40 bg-gradient-to-br from-rose-50/50 via-background to-background dark:from-rose-950/30',
-    'border border-amber-100/80 dark:border-amber-900/40 bg-gradient-to-br from-amber-50/50 via-background to-background dark:from-amber-950/30',
+  const statIconStyles = [
+    'bg-primary/10 text-primary',
+    'bg-blue-500/10 text-blue-600 dark:text-blue-400',
+    'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+    'bg-muted text-muted-foreground',
   ];
 
   const panelStyles = [
-    'border border-orange-100/80 dark:border-orange-900/40 bg-gradient-to-br from-orange-50/40 via-background to-background dark:from-orange-950/30',
-    'border border-slate-200/80 dark:border-slate-700/60 bg-gradient-to-br from-slate-50/50 via-background to-background dark:from-slate-900/30',
-    'border border-rose-100/80 dark:border-rose-900/40 bg-gradient-to-br from-rose-50/40 via-background to-background dark:from-rose-950/30',
+    'border border-primary/20 dark:border-primary/15 bg-linear-to-br from-primary/6 via-background to-background dark:from-primary/10',
+    'border border-border/60 bg-linear-to-br from-muted/40 via-background to-background dark:from-muted/20',
+    'border border-secondary/20 dark:border-secondary/15 bg-linear-to-br from-secondary/6 via-background to-background dark:from-secondary/10',
   ];
+
+  const relativeTime = (date: Date) => {
+    const diff = (Date.now() - date.getTime()) / 1000;
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    if (diff < 86400 * 7) return `${Math.floor(diff / 86400)}d ago`;
+    return date.toLocaleDateString('en-TT', { month: 'short', day: 'numeric' });
+  };
+
+  const getStatusDot = (status: string) => {
+    switch (status) {
+      case 'Open':
+        return 'bg-amber-500';
+      case 'Assigned':
+        return 'bg-primary';
+      case 'In Progress':
+        return 'bg-blue-500';
+      case 'Closed':
+        return 'bg-emerald-500';
+      case 'Pending Parts':
+        return 'bg-orange-500';
+      default:
+        return 'bg-slate-400';
+    }
+  };
 
   return (
     <DashboardLayout>
       {authLoading ? (
-        <div className='space-y-6'>
-          <div className='text-center py-12'>
-            <div className='text-slate-500'>Verifying credentials...</div>
-          </div>
-        </div>
+        <div className='flex items-center justify-center py-24 text-muted-foreground text-sm'>Verifying credentialsâ€¦</div>
       ) : !user ? (
-        <div className='space-y-6'>
-          <div className='text-center py-12'>
-            <div className='text-red-500 font-medium'>Access Denied</div>
-            <p className='text-slate-500 mt-2'>Your credentials could not be verified. Please log in again.</p>
-          </div>
+        <div className='flex flex-col items-center justify-center py-24 gap-2'>
+          <div className='text-destructive font-semibold text-lg'>Access Denied</div>
+          <p className='text-sm text-muted-foreground'>Your credentials could not be verified. Please log in again.</p>
         </div>
       ) : (
         <div className='space-y-6'>
-          <div className='rounded-2xl border border-border/60 bg-gradient-to-r from-primary/10 via-background to-background px-6 py-5'>
-            {loading ? (
-              <div className='space-y-2'>
-                <Skeleton className='h-8 w-64' />
-                <Skeleton className='h-4 w-80' />
+          {/* â”€â”€ Hero Banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+          <div className='relative overflow-hidden rounded-2xl border border-primary/20 bg-linear-to-r from-primary/10 via-background to-accent/20 px-6 py-5 animate-fade-in'>
+            {/* Decorative dot grid */}
+            <div
+              className='pointer-events-none absolute inset-0 opacity-[0.07] dark:opacity-[0.12]'
+              style={{ backgroundImage: 'radial-gradient(circle, rgba(0,124,181,0.8) 1px, transparent 1px)', backgroundSize: '20px 20px' }}
+            />
+            <div className='relative flex items-center justify-between gap-4 flex-wrap'>
+              <div>
+                <p className='text-xs font-medium text-primary/80 mb-1.5 animate-slide-in-left'>
+                  {new Date().toLocaleDateString('en-TT', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                </p>
+                {loading ? (
+                  <>
+                    <Skeleton className='h-8 w-60 mb-2' />
+                    <Skeleton className='h-4 w-72' />
+                  </>
+                ) : (
+                  <>
+                    <h1 className='text-2xl sm:text-3xl font-bold text-foreground'>Welcome back, {user?.name?.split(' ')[0] || 'User'}</h1>
+                    <p className='text-sm text-muted-foreground mt-1'>{headerDescription}</p>
+                  </>
+                )}
               </div>
-            ) : (
-              <>
-                <h1 className='text-3xl font-bold text-slate-900 dark:text-white'>Welcome back, {user?.name || 'User'}</h1>
-                <p className='text-slate-600 dark:text-slate-400 mt-1'>{headerDescription}</p>
-              </>
-            )}
+              <div className='flex items-center gap-3 shrink-0 animate-slide-in-right'>
+                <div className='rounded-xl bg-primary/15 p-3 ring-1 ring-primary/20'>
+                  {roleKey === 'technician' ? (
+                    <Wrench className='h-6 w-6 text-primary' />
+                  ) : roleKey === 'call_admin' ? (
+                    <ClipboardList className='h-6 w-6 text-primary' />
+                  ) : (
+                    <Settings className='h-6 w-6 text-primary' />
+                  )}
+                </div>
+                <div>
+                  <p className='text-sm font-semibold leading-tight'>{roleKey === 'technician' ? 'Technician' : roleKey === 'call_admin' ? 'Call Admin' : 'Administrator'}</p>
+                  <p className='text-xs text-muted-foreground'>{user?.storeId ? 'Store View' : 'Platform View'}</p>
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* Stats Cards */}
-          <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4'>
+          {/* â”€â”€ First-use / Empty State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+          {!loading && stats.openTickets === 0 && stats.assignedTickets === 0 && stats.totalClosed === 0 && (
+            <Card className='border-dashed border-2 border-primary/30 bg-primary/5 animate-fade-in stagger-2'>
+              <CardContent className='py-8 text-center space-y-3'>
+                {user?.role === 'technician' && (
+                  <>
+                    <p className='text-lg font-semibold'>No tickets assigned yet</p>
+                    <p className='text-sm text-muted-foreground'>You're all set. Check back once your store admin assigns you a ticket.</p>
+                  </>
+                )}
+                {user?.role === 'call_admin' && (
+                  <>
+                    <p className='text-lg font-semibold'>Ready to log your first ticket?</p>
+                    <p className='text-sm text-muted-foreground'>Your queue is clear. Head to tickets and create your first service request.</p>
+                    <Button asChild size='sm' className='mt-2'>
+                      <Link href='/tickets'>Create First Ticket</Link>
+                    </Button>
+                  </>
+                )}
+                {user?.role === 'store_admin' && (
+                  <>
+                    <p className='text-lg font-semibold'>Your store is live â€” let's get started</p>
+                    <p className='text-sm text-muted-foreground'>Add your first customer, then log your first ticket to get the workflow going.</p>
+                    <div className='flex gap-2 justify-center mt-2'>
+                      <Button asChild size='sm'>
+                        <Link href='/customers'>Add a Customer</Link>
+                      </Button>
+                      <Button asChild size='sm' variant='outline'>
+                        <Link href='/tickets'>Create a Ticket</Link>
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* â”€â”€ KPI Stats â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+          <div className='grid grid-cols-2 lg:grid-cols-4 gap-4 stagger-children'>
             {loading
-              ? Array.from({ length: 4 }).map((_, index) => (
-                  <Card key={index} className='animate-scale-in' style={{ animationDelay: `${index * 60}ms` }}>
-                    <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
-                      <Skeleton className='h-4 w-24' />
-                    </CardHeader>
-                    <CardContent>
-                      <Skeleton className='h-8 w-16' />
-                      <Skeleton className='h-3 w-28 mt-2' />
+              ? Array.from({ length: 4 }).map((_, i) => (
+                  <Card key={i} className='animate-card-enter'>
+                    <CardContent className='pt-4 px-4 pb-4'>
+                      <Skeleton className='h-3 w-24 mb-3' />
+                      <Skeleton className='h-8 w-16 mb-1.5' />
+                      <Skeleton className='h-2.5 w-28' />
                     </CardContent>
                   </Card>
                 ))
-              : statsCards.map((card, index) => (
-                  <Card key={card.title} className={`animate-scale-in ${statCardStyles[index % statCardStyles.length]}`} style={{ animationDelay: `${index * 60}ms` }}>
-                    <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
-                      <CardTitle className='text-sm font-medium'>{card.title}</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className='text-2xl font-bold'>{card.value}</div>
-                      <p className='text-xs text-slate-500 dark:text-slate-400 mt-1'>{card.subtitle}</p>
+              : statsCards.map((card, i) => (
+                  <Card key={card.title} className={`animate-card-enter relative overflow-hidden ${statCardStyles[i % statCardStyles.length]}`}>
+                    <CardContent className='pt-4 px-4 pb-4'>
+                      <div className='flex items-start justify-between gap-2'>
+                        <div className='min-w-0'>
+                          <p className='text-xs font-medium text-muted-foreground mb-2 truncate'>{card.title}</p>
+                          <div className='text-2xl font-bold leading-none mb-1.5'>{typeof card.value === 'number' ? <CountUp value={card.value} /> : card.value}</div>
+                          <p className='text-xs text-muted-foreground'>{card.subtitle}</p>
+                        </div>
+                        <div className={`rounded-lg p-2 shrink-0 ${statIconStyles[i % statIconStyles.length]}`}>
+                          <card.icon className='h-4 w-4' />
+                        </div>
+                      </div>
                     </CardContent>
                   </Card>
                 ))}
           </div>
 
-          {/* KPI Widgets */}
-          <div className='grid grid-cols-1 md:grid-cols-3 gap-4'>
-            {loading
-              ? Array.from({ length: 3 }).map((_, index) => (
-                  <Card key={index} className='animate-scale-in' style={{ animationDelay: `${index * 60}ms` }}>
-                    <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
-                      <Skeleton className='h-4 w-32' />
-                    </CardHeader>
-                    <CardContent>
-                      <Skeleton className='h-7 w-20' />
-                      <Skeleton className='h-3 w-28 mt-2' />
-                    </CardContent>
-                  </Card>
-                ))
-              : kpiCards.map((card, index) => (
-                  <Card key={card.title} className={`animate-scale-in ${kpiCardStyles[index % kpiCardStyles.length]}`} style={{ animationDelay: `${index * 60}ms` }}>
-                    <CardHeader className='flex flex-row items-center justify-between space-y-0 pb-2'>
-                      <CardTitle className='text-sm font-medium'>{card.title}</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className='text-2xl font-bold'>{card.value}</div>
-                      <p className='text-xs text-slate-500 dark:text-slate-400 mt-1'>{card.subtitle}</p>
-                    </CardContent>
-                  </Card>
-                ))}
-          </div>
-
-          {/* Quick Links */}
-          <div className='grid grid-cols-1 lg:grid-cols-3 gap-4'>
-            <Card className={`animate-scale-in ${panelStyles[0]}`} style={{ animationDelay: '120ms' }}>
-              <CardHeader>
+          {/* â”€â”€ Main Panel Row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+          <div className='grid grid-cols-1 lg:grid-cols-3 gap-4 stagger-children'>
+            {/* Quick Actions */}
+            <Card className={`animate-card-enter ${panelStyles[0]}`}>
+              <CardHeader className='pb-3'>
                 <CardTitle className='text-base'>Quick Actions</CardTitle>
-                <CardDescription>Jump straight into the tools you use most</CardDescription>
+                <CardDescription>Jump straight into frequently used tools</CardDescription>
               </CardHeader>
-              <CardContent className='grid gap-3'>
-                {quickLinks.map((link, index) => (
-                  <Link
-                    key={link.href}
-                    href={link.href}
-                    className={`group flex items-center justify-between rounded-lg border px-3 py-2 text-sm font-medium transition-colors hover:shadow-sm ${
-                      index % 3 === 0
-                        ? 'border-orange-200/70 bg-orange-50/70 text-orange-900 hover:bg-orange-100/70 dark:border-orange-800/50 dark:bg-orange-950/40 dark:text-orange-100'
-                        : index % 3 === 1
-                          ? 'border-rose-200/70 bg-rose-50/70 text-rose-900 hover:bg-rose-100/70 dark:border-rose-800/50 dark:bg-rose-950/40 dark:text-rose-100'
-                          : 'border-amber-200/70 bg-amber-50/70 text-amber-900 hover:bg-amber-100/70 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-100'
-                    }`}
-                  >
-                    <span className='flex items-center gap-2 text-foreground'>
-                      <link.icon className='h-4 w-4 text-primary' />
-                      {link.label}
-                    </span>
-                    <span className='text-xs text-muted-foreground group-hover:text-foreground'>{link.helper}</span>
-                  </Link>
-                ))}
+              <CardContent>
+                {roleKey === 'management' ? (
+                  <div className='grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-2'>
+                    {quickLinks.map((link, i) => (
+                      <Link
+                        key={link.href}
+                        href={link.href}
+                        className='group flex flex-col gap-2 rounded-xl border border-border/60 bg-card p-3 transition-all duration-200 hover:border-primary/30 hover:bg-primary/5 hover:shadow-sm hover:-translate-y-0.5'
+                      >
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${statIconStyles[i % statIconStyles.length]}`}>
+                          <link.icon className='h-4 w-4' />
+                        </div>
+                        <div>
+                          <p className='text-sm font-semibold leading-tight'>{link.label}</p>
+                          <p className='text-[11px] text-muted-foreground mt-0.5 leading-tight'>{link.description}</p>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                ) : (
+                  <div className='space-y-2'>
+                    {quickLinks.map((link) => (
+                      <Link
+                        key={link.href}
+                        href={link.href}
+                        className='group flex items-center justify-between rounded-lg border border-border/60 bg-card px-3 py-2.5 transition-all duration-200 hover:bg-primary/5 hover:border-primary/30 hover:shadow-sm'
+                      >
+                        <span className='flex items-center gap-2.5 text-sm font-medium text-foreground'>
+                          <link.icon className={`h-4 w-4 ${link.accent}`} />
+                          {link.label}
+                        </span>
+                        <div className='flex items-center gap-1.5'>
+                          <span className='text-xs text-muted-foreground'>{link.description}</span>
+                          <ChevronRight className='h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity' />
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
 
-            <Card className={`animate-scale-in ${panelStyles[1]}`} style={{ animationDelay: '180ms' }}>
-              <CardHeader>
+            {/* Pipeline / Queue Health */}
+            <Card className={`animate-card-enter ${panelStyles[1]}`}>
+              <CardHeader className='pb-3'>
                 <CardTitle className='text-base'>{roleKey === 'technician' ? 'My Queue' : roleKey === 'call_admin' ? 'Intake Health' : 'Pipeline Overview'}</CardTitle>
                 <CardDescription>
-                  {roleKey === 'technician' ? 'Your current workload at a glance' : roleKey === 'call_admin' ? "Today's intake and follow-ups" : 'At-a-glance workload health'}
+                  {roleKey === 'technician' ? 'Your workload at a glance' : roleKey === 'call_admin' ? "Today's tickets and follow-ups" : 'At-a-glance workload balance'}
                 </CardDescription>
               </CardHeader>
               <CardContent className='space-y-4'>
                 {roleKey === 'technician' ? (
                   <>
-                    <div className='flex items-center justify-between text-sm'>
-                      <span className='text-muted-foreground'>Open</span>
-                      <span className='font-semibold text-foreground'>{stats.myOpen}</span>
-                    </div>
-                    <div className='flex items-center justify-between text-sm'>
-                      <span className='text-muted-foreground'>Assigned</span>
-                      <span className='font-semibold text-foreground'>{stats.myAssigned}</span>
-                    </div>
-                    <div className='flex items-center justify-between text-sm'>
-                      <span className='text-muted-foreground'>Closed today</span>
-                      <span className='font-semibold text-foreground'>{stats.myClosedToday}</span>
-                    </div>
-                    <div className='rounded-lg bg-primary/10 px-3 py-2 text-xs text-primary'>Prioritize assigned work to keep response times tight.</div>
+                    {[
+                      { label: 'Open', value: stats.myOpen, max: Math.max(stats.myTickets, 1), color: 'bg-amber-500' },
+                      { label: 'Assigned', value: stats.myAssigned, max: Math.max(stats.myTickets, 1), color: 'bg-primary' },
+                      { label: 'Closed today', value: stats.myClosedToday, max: Math.max(stats.myTickets, 1), color: 'bg-emerald-500' },
+                    ].map((item) => (
+                      <div key={item.label}>
+                        <div className='flex justify-between text-xs mb-1.5'>
+                          <span className='text-muted-foreground'>{item.label}</span>
+                          <span className='font-semibold'>{item.value}</span>
+                        </div>
+                        <div className='h-1.5 bg-muted rounded-full overflow-hidden'>
+                          <div className={`h-1.5 rounded-full transition-all duration-700 ${item.color}`} style={{ width: `${Math.min(100, (item.value / item.max) * 100)}%` }} />
+                        </div>
+                      </div>
+                    ))}
+                    <div className='rounded-lg bg-primary/8 px-3 py-2 text-xs text-primary'>Prioritize assigned work to keep response times tight.</div>
                   </>
                 ) : roleKey === 'call_admin' ? (
                   <>
-                    <div className='flex items-center justify-between text-sm'>
-                      <span className='text-muted-foreground'>Created today</span>
-                      <span className='font-semibold text-foreground'>{stats.myCreatedToday}</span>
-                    </div>
-                    <div className='flex items-center justify-between text-sm'>
-                      <span className='text-muted-foreground'>Active tickets</span>
-                      <span className='font-semibold text-foreground'>{stats.myActiveCreated}</span>
-                    </div>
-                    <div className='flex items-center justify-between text-sm'>
-                      <span className='text-muted-foreground'>Closed today</span>
-                      <span className='font-semibold text-foreground'>{stats.myClosedToday}</span>
-                    </div>
-                    <div className='rounded-lg bg-primary/10 px-3 py-2 text-xs text-primary'>Capture complete details to speed up dispatch.</div>
+                    {[
+                      { label: 'Created today', value: stats.myCreatedToday, max: Math.max(stats.myCreated, 1), color: 'bg-primary' },
+                      { label: 'Active tickets', value: stats.myActiveCreated, max: Math.max(stats.myCreated, 1), color: 'bg-amber-500' },
+                      { label: 'Closed today', value: stats.myClosedToday, max: Math.max(stats.myCreated, 1), color: 'bg-emerald-500' },
+                    ].map((item) => (
+                      <div key={item.label}>
+                        <div className='flex justify-between text-xs mb-1.5'>
+                          <span className='text-muted-foreground'>{item.label}</span>
+                          <span className='font-semibold'>{item.value}</span>
+                        </div>
+                        <div className='h-1.5 bg-muted rounded-full overflow-hidden'>
+                          <div className={`h-1.5 rounded-full transition-all duration-700 ${item.color}`} style={{ width: `${Math.min(100, (item.value / item.max) * 100)}%` }} />
+                        </div>
+                      </div>
+                    ))}
+                    <div className='rounded-lg bg-primary/8 px-3 py-2 text-xs text-primary'>Capture complete details to speed up dispatch.</div>
                   </>
                 ) : (
                   <>
-                    <div className='flex items-center justify-between text-sm'>
-                      <span className='text-muted-foreground'>Open</span>
-                      <span className='font-semibold text-foreground'>{stats.openTickets}</span>
-                    </div>
-                    <div className='flex items-center justify-between text-sm'>
-                      <span className='text-muted-foreground'>Assigned</span>
-                      <span className='font-semibold text-foreground'>{stats.assignedTickets}</span>
-                    </div>
-                    <div className='flex items-center justify-between text-sm'>
-                      <span className='text-muted-foreground'>Unassigned</span>
-                      <span className='font-semibold text-foreground'>{stats.unassignedTickets}</span>
-                    </div>
-                    <div className='rounded-lg bg-primary/10 px-3 py-2 text-xs text-primary'>Keep unassigned tickets moving to avoid delays.</div>
+                    {(() => {
+                      const totalActive = Math.max(stats.openTickets + stats.assignedTickets + stats.totalClosed, 1);
+                      return [
+                        { label: 'Open', value: stats.openTickets, max: totalActive, color: 'bg-amber-500' },
+                        { label: 'Assigned', value: stats.assignedTickets, max: totalActive, color: 'bg-primary' },
+                        { label: 'Unassigned', value: stats.unassignedTickets, max: totalActive, color: 'bg-destructive/70' },
+                        { label: 'Total Closed', value: stats.totalClosed, max: totalActive, color: 'bg-emerald-500' },
+                      ].map((item) => (
+                        <div key={item.label}>
+                          <div className='flex justify-between text-xs mb-1.5'>
+                            <span className='text-muted-foreground'>{item.label}</span>
+                            <span className='font-semibold'>{item.value}</span>
+                          </div>
+                          <div className='h-1.5 bg-muted rounded-full overflow-hidden'>
+                            <div className={`h-1.5 rounded-full transition-all duration-700 ${item.color}`} style={{ width: `${Math.min(100, (item.value / item.max) * 100)}%` }} />
+                          </div>
+                        </div>
+                      ));
+                    })()}
+                    <div className='rounded-lg bg-primary/8 px-3 py-2 text-xs text-primary'>Keep unassigned tickets moving to avoid delays.</div>
                   </>
                 )}
               </CardContent>
             </Card>
 
+            {/* Third panel: context-aware */}
             {roleKey === 'management' ? (
-              <Card className={`animate-scale-in ${panelStyles[2]}`} style={{ animationDelay: '240ms' }}>
-                <CardHeader>
+              <Card className={`animate-card-enter ${panelStyles[2]}`}>
+                <CardHeader className='pb-3'>
                   <CardTitle className='text-base'>Reports Snapshot</CardTitle>
-                  <CardDescription>Quick access to analytics</CardDescription>
+                  <CardDescription>Access analytics and trends</CardDescription>
                 </CardHeader>
-                <CardContent className='space-y-3'>
-                  <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-                    <BarChart3 className='h-4 w-4 text-primary' />
-                    View ticket trends and resolution metrics
-                  </div>
-                  <Link href='/reports'>
-                    <Button variant='outline' size='sm' className='w-full'>
-                      Open Reports
-                    </Button>
-                  </Link>
+                <CardContent className='space-y-2'>
+                  {[
+                    { icon: TrendingUp, label: 'Time by Technician', href: '/reports/time-by-technician', desc: 'Hours & visit rates per tech' },
+                    { icon: BarChart3, label: 'Monthly Summary', href: '/reports/monthly', desc: 'Month-over-month overview' },
+                    { icon: Activity, label: 'All Reports', href: '/reports', desc: 'Browse full reports library' },
+                  ].map((item) => (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className='group flex items-center gap-3 rounded-lg border border-border/60 bg-card p-2.5 transition-all duration-200 hover:border-primary/30 hover:bg-primary/5'
+                    >
+                      <div className='rounded-md bg-primary/10 p-1.5 shrink-0'>
+                        <item.icon className='h-3.5 w-3.5 text-primary' />
+                      </div>
+                      <div className='min-w-0 flex-1'>
+                        <p className='text-sm font-medium truncate'>{item.label}</p>
+                        <p className='text-xs text-muted-foreground truncate'>{item.desc}</p>
+                      </div>
+                      <ChevronRight className='h-3.5 w-3.5 text-muted-foreground ml-auto shrink-0 opacity-0 group-hover:opacity-100 transition-opacity' />
+                    </Link>
+                  ))}
                 </CardContent>
               </Card>
             ) : roleKey === 'call_admin' ? (
-              <Card className={`animate-scale-in ${panelStyles[2]}`} style={{ animationDelay: '240ms' }}>
-                <CardHeader>
+              <Card className={`animate-card-enter ${panelStyles[2]}`}>
+                <CardHeader className='pb-3'>
                   <CardTitle className='text-base'>Customer Hub</CardTitle>
                   <CardDescription>Keep customer records current</CardDescription>
                 </CardHeader>
                 <CardContent className='space-y-3'>
-                  <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-                    <Users className='h-4 w-4 text-primary' />
+                  <div className='flex items-center gap-2 text-sm text-muted-foreground rounded-lg bg-muted/50 px-3 py-2.5'>
+                    <Users className='h-4 w-4 text-primary shrink-0' />
                     Verify contact info before creating tickets
                   </div>
                   <Link href='/customers'>
-                    <Button variant='outline' size='sm' className='w-full'>
+                    <Button variant='outline' size='sm' className='w-full gap-2'>
+                      <Users className='h-3.5 w-3.5' />
                       Open Customers
                     </Button>
                   </Link>
                 </CardContent>
               </Card>
             ) : (
-              <Card className={`animate-scale-in ${panelStyles[2]}`} style={{ animationDelay: '240ms' }}>
-                <CardHeader>
+              <Card className={`animate-card-enter ${panelStyles[2]}`}>
+                <CardHeader className='pb-3'>
                   <CardTitle className='text-base'>Field Notes</CardTitle>
                   <CardDescription>Jump back into active work</CardDescription>
                 </CardHeader>
                 <CardContent className='space-y-3'>
-                  <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-                    <ClipboardList className='h-4 w-4 text-primary' />
+                  <div className='flex items-center gap-2 text-sm text-muted-foreground rounded-lg bg-muted/50 px-3 py-2.5'>
+                    <ClipboardList className='h-4 w-4 text-primary shrink-0' />
                     Keep notes updated to close tickets faster
                   </div>
                   <Link href='/tickets'>
-                    <Button variant='outline' size='sm' className='w-full'>
+                    <Button variant='outline' size='sm' className='w-full gap-2'>
+                      <ClipboardList className='h-3.5 w-3.5' />
                       Open My Tickets
                     </Button>
                   </Link>
@@ -585,57 +708,51 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {/* Alerts + Recent Work */}
-          <div className='grid grid-cols-1 xl:grid-cols-3 gap-4'>
-            <Card
-              className='animate-fade-in xl:col-span-1 border border-amber-100/80 dark:border-amber-900/40 bg-gradient-to-br from-amber-50/50 via-background to-background dark:from-amber-950/30'
-              style={{ animationDelay: '300ms' }}
-            >
-              <CardHeader>
+          {/* â”€â”€ Alerts + Recent Activity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
+          <div className='grid grid-cols-1 xl:grid-cols-3 gap-4 stagger-children'>
+            {/* Alerts â€” 1 col, right side on xl */}
+            <Card className='animate-card-enter xl:order-2 border border-amber-100/80 dark:border-amber-900/40 bg-linear-to-br from-amber-50/50 via-background to-background dark:from-amber-950/30'>
+              <CardHeader className='pb-3'>
                 <CardTitle className='text-base'>Role Alerts</CardTitle>
-                <CardDescription>Items that need attention</CardDescription>
+                <CardDescription>Items that need your attention</CardDescription>
               </CardHeader>
               <CardContent className='space-y-3'>
                 {loading
-                  ? Array.from({ length: 3 }).map((_, index) => (
-                      <div key={index} className='rounded-lg border p-3'>
+                  ? Array.from({ length: 3 }).map((_, i) => (
+                      <div key={i} className='rounded-lg border p-3 space-y-2'>
                         <Skeleton className='h-4 w-40' />
-                        <Skeleton className='h-3 w-56 mt-2' />
+                        <Skeleton className='h-3 w-56' />
                       </div>
                     ))
-                  : alerts.map((alert, index) => (
+                  : alerts.map((alert, i) => (
                       <div
-                        key={index}
-                        className={`rounded-lg border border-border/80 bg-background/80 p-3 border-l-4 ${
-                          alert.tone === 'danger' ? 'border-l-destructive' : alert.tone === 'warning' ? 'border-l-amber-500' : 'border-l-rose-500'
+                        key={i}
+                        className={`rounded-lg border border-border/60 bg-background/80 p-3 border-l-4 ${
+                          alert.tone === 'danger' ? 'border-l-destructive' : alert.tone === 'warning' ? 'border-l-amber-500' : 'border-l-emerald-500'
                         }`}
                       >
-                        <div className='flex items-center gap-2 text-sm font-medium'>
+                        <div className='flex items-start gap-2 text-sm font-medium mb-1.5'>
                           {alert.tone === 'danger' ? (
-                            <AlertTriangle className='h-4 w-4 text-destructive' />
+                            <AlertTriangle className='h-4 w-4 text-destructive shrink-0 mt-0.5' />
                           ) : alert.tone === 'warning' ? (
-                            <AlarmClock className='h-4 w-4 text-amber-500' />
+                            <AlarmClock className='h-4 w-4 text-amber-500 shrink-0 mt-0.5' />
                           ) : (
-                            <Badge variant='secondary' className='bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-100'>
-                              OK
-                            </Badge>
+                            <CheckCircle2 className='h-4 w-4 text-emerald-500 shrink-0 mt-0.5' />
                           )}
-                          <span className='text-foreground'>{alert.title}</span>
+                          <span>{alert.title}</span>
                         </div>
-                        <p className='text-xs text-muted-foreground mt-2'>{alert.description}</p>
+                        <p className='text-xs text-muted-foreground pl-6'>{alert.description}</p>
                       </div>
                     ))}
               </CardContent>
             </Card>
 
-            <Card
-              className='animate-fade-in xl:col-span-2 border border-slate-200/80 dark:border-slate-700/70 bg-gradient-to-br from-slate-50/60 via-background to-background dark:from-slate-900/40'
-              style={{ animationDelay: '330ms' }}
-            >
-              <CardHeader>
-                <div className='flex justify-between items-center'>
+            {/* Recent Activity â€” 2 cols on xl */}
+            <Card className='animate-card-enter xl:col-span-2 xl:order-1 border border-border/70 bg-linear-to-br from-muted/30 via-background to-background'>
+              <CardHeader className='pb-3'>
+                <div className='flex items-center justify-between'>
                   <div>
-                    <CardTitle>{roleKey === 'technician' ? 'Recent Work' : roleKey === 'call_admin' ? 'Recent Intake' : 'Recent Activity'}</CardTitle>
+                    <CardTitle className='text-base'>{roleKey === 'technician' ? 'Recent Work' : roleKey === 'call_admin' ? 'Recent Intake' : 'Recent Activity'}</CardTitle>
                     <CardDescription>
                       {roleKey === 'technician' ? 'Latest tickets you are working on' : roleKey === 'call_admin' ? 'Newest tickets you created' : 'Latest ticket updates across the team'}
                     </CardDescription>
@@ -649,32 +766,41 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent>
                 {loading ? (
-                  <div className='space-y-3'>
-                    {Array.from({ length: 4 }).map((_, index) => (
-                      <div key={index} className='flex items-center justify-between p-4 border rounded-lg'>
-                        <div className='flex-1 space-y-2'>
-                          <Skeleton className='h-4 w-24' />
-                          <Skeleton className='h-3 w-56' />
+                  <div className='space-y-1.5'>
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <div key={i} className='flex items-center gap-3 p-3 rounded-lg border border-border/40'>
+                        <Skeleton className='h-2 w-2 rounded-full shrink-0' />
+                        <div className='flex-1 space-y-1.5'>
+                          <Skeleton className='h-3.5 w-28' />
+                          <Skeleton className='h-3 w-48' />
                         </div>
-                        <Skeleton className='h-3 w-24' />
+                        <Skeleton className='h-3 w-12' />
                       </div>
                     ))}
                   </div>
                 ) : recentWork.length === 0 ? (
-                  <div className='text-center py-8 text-slate-500'>No recent work yet. Start with your quick actions above.</div>
+                  <div className='flex flex-col items-center gap-2 py-10 text-muted-foreground'>
+                    <Activity className='h-8 w-8 opacity-30' />
+                    <p className='text-sm font-medium'>No recent activity yet</p>
+                    <p className='text-xs text-center'>Use the quick actions above to get started.</p>
+                  </div>
                 ) : (
-                  <div className='space-y-3'>
+                  <div className='space-y-1'>
                     {recentWork.map((item) => (
                       <Link key={item.id} href={`/tickets/${item.id}`}>
-                        <div className='flex items-center justify-between p-4 border rounded-lg hover:bg-slate-50/80 dark:hover:bg-slate-800/70 transition-colors'>
-                          <div className='flex-1'>
-                            <div className='flex items-center space-x-2'>
-                              <span className='font-medium text-slate-900 dark:text-white'>{item.title}</span>
-                              <Badge className={getStatusColor(item.status)}>{item.status}</Badge>
+                        <div className='group flex items-center gap-3 p-3 rounded-lg transition-all duration-200 hover:bg-muted/50 hover:translate-x-0.5 cursor-pointer'>
+                          <div className={`h-2 w-2 rounded-full shrink-0 ${getStatusDot(item.status)}`} />
+                          <div className='flex-1 min-w-0'>
+                            <div className='flex items-center gap-2 mb-0.5 flex-wrap'>
+                              <span className='text-sm font-medium text-foreground'>{item.title}</span>
+                              <Badge className={`${getStatusColor(item.status)} text-[10px] py-0 px-1.5`}>{item.status}</Badge>
                             </div>
-                            <p className='text-sm text-slate-600 dark:text-slate-400 mt-1'>{item.subtitle}</p>
+                            <p className='text-xs text-muted-foreground truncate'>{item.subtitle}</p>
                           </div>
-                          <div className='text-xs text-slate-500 dark:text-slate-400'>{item.time}</div>
+                          <div className='flex items-center gap-1.5 shrink-0'>
+                            <span className='text-xs text-muted-foreground'>{relativeTime(item.rawDate)}</span>
+                            <ChevronRight className='h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity' />
+                          </div>
                         </div>
                       </Link>
                     ))}

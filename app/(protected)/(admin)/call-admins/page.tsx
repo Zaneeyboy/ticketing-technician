@@ -24,7 +24,7 @@ interface CallAdminSummary {
 }
 
 export default async function CallAdminsPage() {
-  await requireRole(['admin']);
+  await requireRole(['store_admin']);
 
   const loadData = async (): Promise<CallAdminSummary[]> => {
     try {
@@ -66,7 +66,7 @@ export default async function CallAdminsPage() {
         </div>
 
         {/* Summary Stats */}
-        <div className='grid grid-cols-1 md:grid-cols-4 gap-4'>
+        <div className='grid grid-cols-2 md:grid-cols-4 gap-4'>
           <Card className='animate-scale-in' style={{ animationDelay: '0ms' }}>
             <CardHeader className='pb-2'>
               <CardTitle className='text-sm font-medium text-muted-foreground'>Total Call Admins</CardTitle>

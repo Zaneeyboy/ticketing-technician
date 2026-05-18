@@ -23,7 +23,7 @@ export function EquipmentAnalysisReport({ data }: EquipmentAnalysisReportProps) 
       <div className='grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4'>
         <Card>
           <CardHeader className='pb-1 sm:pb-2'>
-            <CardTitle className='text-xs sm:text-sm font-medium text-gray-600'>Machines</CardTitle>
+            <CardTitle className='text-xs sm:text-sm font-medium text-muted-foreground'>Machines</CardTitle>
           </CardHeader>
           <CardContent>
             <div className='text-xl sm:text-2xl font-bold'>{totalMachines}</div>
@@ -32,7 +32,7 @@ export function EquipmentAnalysisReport({ data }: EquipmentAnalysisReportProps) 
 
         <Card>
           <CardHeader className='pb-1 sm:pb-2'>
-            <CardTitle className='text-xs sm:text-sm font-medium text-gray-600'>Service Calls</CardTitle>
+            <CardTitle className='text-xs sm:text-sm font-medium text-muted-foreground'>Service Calls</CardTitle>
           </CardHeader>
           <CardContent>
             <div className='text-xl sm:text-2xl font-bold'>{totalIncidents}</div>
@@ -41,7 +41,7 @@ export function EquipmentAnalysisReport({ data }: EquipmentAnalysisReportProps) 
 
         <Card>
           <CardHeader className='pb-1 sm:pb-2'>
-            <CardTitle className='text-xs sm:text-sm font-medium text-gray-600'>Avg Calls</CardTitle>
+            <CardTitle className='text-xs sm:text-sm font-medium text-muted-foreground'>Avg Calls</CardTitle>
           </CardHeader>
           <CardContent>
             <div className='text-xl sm:text-2xl font-bold'>{avgIncidentsPerMachine}</div>
@@ -50,11 +50,11 @@ export function EquipmentAnalysisReport({ data }: EquipmentAnalysisReportProps) 
 
         <Card>
           <CardHeader className='pb-1 sm:pb-2'>
-            <CardTitle className='text-xs sm:text-sm font-medium text-gray-600'>High Maint.</CardTitle>
+            <CardTitle className='text-xs sm:text-sm font-medium text-muted-foreground'>High Maint.</CardTitle>
           </CardHeader>
           <CardContent>
             <div className='text-xl sm:text-2xl font-bold text-red-600'>{highMaintenanceMachines}</div>
-            <div className='text-xs text-gray-500 mt-1'>≥5</div>
+            <div className='text-xs text-muted-foreground mt-1'>≥5</div>
           </CardContent>
         </Card>
       </div>
@@ -83,13 +83,13 @@ export function EquipmentAnalysisReport({ data }: EquipmentAnalysisReportProps) 
               <TableBody>
                 {data.map((machine) => {
                   let status = 'Healthy';
-                  let statusColor = 'bg-green-600';
+                  let statusColor = 'bg-secondary';
                   if (machine.totalIncidents >= 10) {
                     status = 'Critical';
-                    statusColor = 'bg-red-600';
+                    statusColor = 'bg-destructive';
                   } else if (machine.totalIncidents >= 5) {
                     status = 'At Risk';
-                    statusColor = 'bg-orange-600';
+                    statusColor = 'bg-primary';
                   }
 
                   return (
@@ -130,8 +130,8 @@ export function EquipmentAnalysisReport({ data }: EquipmentAnalysisReportProps) 
                 <div className='flex items-start justify-between mb-2'>
                   <div>
                     <div className='font-medium'>{machine.type}</div>
-                    <div className='text-sm text-gray-600'>{machine.serialNumber}</div>
-                    <div className='text-xs text-gray-500'>{machine.customerName}</div>
+                    <div className='text-sm text-muted-foreground'>{machine.serialNumber}</div>
+                    <div className='text-xs text-muted-foreground'>{machine.customerName}</div>
                   </div>
                   <Badge className='bg-red-600'>{machine.totalIncidents} incidents</Badge>
                 </div>

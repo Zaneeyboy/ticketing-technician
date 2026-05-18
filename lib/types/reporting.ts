@@ -15,6 +15,7 @@ export interface ReportTicket {
   status: TicketStatus;
   createdAt: string | null;
   closedAt?: string | null;
+  scheduledVisitDate?: string | null;
   assignedTo?: string | null;
   assignedToName?: string | null;
   issueDescription?: string | null;
