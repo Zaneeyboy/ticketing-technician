@@ -396,7 +396,7 @@ const _getStoreDetailCached = unstable_cache(
     };
   },
   ['store-detail'],
-  { tags: [CACHE_TAGS.STORES, CACHE_TAGS.USERS, CACHE_TAGS.TICKETS], revalidate: false },
+  { tags: [CACHE_TAGS.STORES, CACHE_TAGS.USERS, CACHE_TAGS.TICKETS], revalidate: 60 },
 );
 
 // ─── HQ Modular Reports ───────────────────────────────────────────────────────
@@ -705,8 +705,9 @@ export async function onboardStore(data: any): Promise<{ success: boolean; store
     });
 
     await invalidateStores();
-    await revalidateCache([CACHE_TAGS.USERS]);
+    await revalidateCache([CACHE_TAGS.USERS, CACHE_TAGS.TICKETS]);
     revalidatePath('/hq/stores');
+    revalidatePath(`/hq/stores/${storeRef.id}`);
     revalidatePath('/hq/dashboard');
 
     // Send onboarding email to store admin — non-blocking

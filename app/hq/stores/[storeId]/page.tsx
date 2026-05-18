@@ -1,5 +1,5 @@
 import { getStoreDetail, setStoreStatus } from '@/lib/actions/stores';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -13,7 +13,12 @@ export default async function HQStorePage({ params }: { params: Promise<{ storeI
   const { storeId } = await params;
   const result = await getStoreDetail(storeId);
 
-  if (!result.success || !result.store) {
+  if (!result.success) {
+    if (result.error === 'Unauthorized') redirect('/hq/stores');
+    notFound();
+  }
+
+  if (!result.store) {
     notFound();
   }
 
