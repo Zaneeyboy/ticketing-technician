@@ -1142,7 +1142,7 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
               <Button
                 type='button'
                 onClick={handleSubmit(handleSaveAndClose)}
-                disabled={submitting || closingTicket || !formState.isValid || selectedMachineIds.size === 0}
+                disabled={submitting || closingTicket || selectedMachineIds.size === 0}
                 className='flex-1 bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-800'
               >
                 {closingTicket ? (
