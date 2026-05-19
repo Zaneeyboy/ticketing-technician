@@ -137,12 +137,10 @@ export function ViewTicketModal({ open, onOpenChange, ticket }: ViewTicketModalP
                 <p className='text-xs text-slate-500 font-medium'>Created</p>
                 <p className='text-sm font-medium'>{formatDate(ticket.createdAt, true)}</p>
               </div>
-              {ticket.createdByName && (
-                <div>
-                  <p className='text-xs text-slate-500 font-medium'>Created By</p>
-                  <p className='text-sm font-medium'>{ticket.createdByName}</p>
-                </div>
-              )}
+              <div>
+                <p className='text-xs text-slate-500 font-medium'>Created By</p>
+                <p className='text-sm font-medium'>{ticket.createdByName || '—'}</p>
+              </div>
               {ticket.closedAt && (
                 <div>
                   <p className='text-xs text-slate-500 font-medium'>Closed</p>

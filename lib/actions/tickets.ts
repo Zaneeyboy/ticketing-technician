@@ -146,7 +146,7 @@ export async function createTicket(data: any) {
       createdAt: Timestamp.now(),
       updatedAt: Timestamp.now(),
       createdBy: user.uid,
-      createdByName: user.name ?? null,
+      createdByName: user.name || user.email || null,
       statusHistory: [
         {
           status: validated.assignedTo ? 'Assigned' : 'Open',

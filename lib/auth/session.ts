@@ -73,7 +73,7 @@ export const getCurrentUser = cache(async (): Promise<User | null> => {
     return {
       uid: session.uid,
       email: session.email || '',
-      name: userData?.name || '',
+      name: userData?.name || (session as any).name || '',
       role: userData?.role || 'technician',
       storeId: userData?.storeId ?? null,
       storeName: userData?.storeName || undefined,
