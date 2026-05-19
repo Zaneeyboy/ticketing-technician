@@ -13,6 +13,12 @@ interface AuthContextType {
   refreshUser: () => Promise<void>;
 }
 
+interface AuthState {
+  user: User | null;
+  firebaseUser: FirebaseUser | null;
+  loading: boolean;
+}
+
 const AuthContext = createContext<AuthContextType>({
   user: null,
   firebaseUser: null,
@@ -21,79 +27,72 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [authState, setAuthState] = useState<AuthState>({ user: null, firebaseUser: null, loading: true });
 
-  const fetchUserData = async (firebaseUser: FirebaseUser) => {
+  /**
+   * Fetch the Firestore user profile and return the resolved User, null (deny access),
+   * or 'skip' on transient network errors (stay in loading state instead of kicking out).
+   */
+  const resolveUserDoc = useCallback(async (fbUser: FirebaseUser): Promise<User | null | 'skip'> => {
     try {
-      const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-      if (userDoc.exists()) {
-        const userData = userDoc.data();
-        const disabled = Boolean(userData.disabled);
-        if (disabled) {
-          await signOut(auth);
-          setUser(null);
-          return;
-        }
-
-        setUser({
-          uid: firebaseUser.uid,
-          email: firebaseUser.email || '',
-          name: userData.name || '',
-          role: userData.role || 'technician',
-          storeId: userData.storeId ?? null,
-          storeName: userData.storeName || undefined,
-          disabled,
-          createdAt: userData.createdAt?.toDate?.() ?? new Date(),
-          updatedAt: userData.updatedAt?.toDate?.() ?? new Date(),
-        });
-      } else {
-        // User authenticated but no profile in Firestore - deny access
+      const snap = await getDoc(doc(db, 'users', fbUser.uid));
+      if (!snap.exists()) {
         console.warn('User document not found in Firestore');
-        setUser(null);
+        return null;
       }
+      const data = snap.data();
+      const disabled = Boolean(data.disabled);
+      if (disabled) {
+        await signOut(auth);
+        return null;
+      }
+      return {
+        uid: fbUser.uid,
+        email: fbUser.email || '',
+        name: data.name || '',
+        role: data.role || 'technician',
+        storeId: data.storeId ?? null,
+        storeName: data.storeName || undefined,
+        disabled,
+        createdAt: data.createdAt?.toDate?.() ?? new Date(),
+        updatedAt: data.updatedAt?.toDate?.() ?? new Date(),
+      };
     } catch (error: any) {
-      // Handle offline and connectivity errors gracefully
       if (error?.code === 'unavailable' || error?.code === 'unauthenticated') {
         console.debug('Firestore temporarily unavailable, will retry on next check');
-        // Don't set user to null on temporary errors - let them try to access
-        return;
+        return 'skip';
       }
       console.error('Error fetching user data:', error);
-      // Firestore error - deny access
-      setUser(null);
+      return null;
     }
-  };
+  }, []);
 
   const refreshUser = useCallback(async () => {
-    if (firebaseUser) {
-      await fetchUserData(firebaseUser);
+    const fbUser = authState.firebaseUser;
+    if (!fbUser) return;
+    const result = await resolveUserDoc(fbUser);
+    if (result !== 'skip') {
+      setAuthState((prev) => ({ ...prev, user: result }));
     }
-  }, [firebaseUser]);
+  }, [authState.firebaseUser, resolveUserDoc]);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      try {
-        setFirebaseUser(firebaseUser);
-
-        if (firebaseUser) {
-          await fetchUserData(firebaseUser);
-        } else {
-          setUser(null);
-        }
-      } catch (error) {
-        console.error('Error in auth state change:', error);
-        setUser(null);
-      } finally {
-        setLoading(false);
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      if (!fbUser) {
+        // Single setState — one render, no intermediates
+        setAuthState({ user: null, firebaseUser: null, loading: false });
+        return;
       }
+      const result = await resolveUserDoc(fbUser);
+      if (result === 'skip') return; // transient error — leave loading:true, retry next auth tick
+      // Single setState — one render that completes the whole auth sequence
+      setAuthState({ user: result, firebaseUser: fbUser, loading: false });
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [resolveUserDoc]);
 
-  const contextValue = useMemo(() => ({ user, firebaseUser, loading, refreshUser }), [user, firebaseUser, loading, refreshUser]);
+  const contextValue = useMemo(() => ({ user: authState.user, firebaseUser: authState.firebaseUser, loading: authState.loading, refreshUser }), [authState, refreshUser]);
 
   return <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>;
 }

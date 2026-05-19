@@ -241,13 +241,6 @@ export function CreateTicketModal({ open, onOpenChange, onSuccess, preloadedCust
     }));
   };
 
-  const handleMachineTypeChange = (machineId: string, newType: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      machines: prev.machines.map((m) => (m.machineId === machineId ? { ...m, machineType: newType } : m)),
-    }));
-  };
-
   const handleMachinePriorityChange = (machineId: string, newPriority: string) => {
     setFormData((prev) => ({
       ...prev,
@@ -355,6 +348,7 @@ export function CreateTicketModal({ open, onOpenChange, onSuccess, preloadedCust
           machines: formData.machines,
           briefDescription: formData.briefDescription || undefined,
           issueDescription: formData.issueDescription,
+          internalNotes: formData.internalNotes || undefined,
           contactPerson: formData.contactPerson,
           assignedToName: formData.assignedToName || null,
           scheduledVisitDate: scheduledVisitDateTime,
@@ -630,18 +624,7 @@ export function CreateTicketModal({ open, onOpenChange, onSuccess, preloadedCust
                             <div className='flex gap-3 flex-wrap'>
                               <div className='space-y-0.5'>
                                 <label className='text-[11px] text-muted-foreground uppercase tracking-wide font-medium'>Type</label>
-                                <Select value={machine.machineType} onValueChange={(value) => handleMachineTypeChange(machine.machineId, value)}>
-                                  <SelectTrigger className='h-7 w-36 text-xs border-border'>
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {MACHINE_TYPES.map((type) => (
-                                      <SelectItem key={type} value={type}>
-                                        {type}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
+                                <p className='text-xs text-foreground font-medium leading-7'>{machine.machineType || '—'}</p>
                               </div>
                               <div className='space-y-0.5'>
                                 <label className='text-[11px] text-muted-foreground uppercase tracking-wide font-medium'>Priority</label>

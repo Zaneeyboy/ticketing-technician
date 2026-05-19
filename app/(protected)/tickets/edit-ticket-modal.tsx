@@ -9,10 +9,10 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { showToast } from '@/lib/toast';
-import { getTechniciansForAssignment, TechnicianForTicket } from '@/lib/actions/tickets';
+import { getTechniciansForAssignment, getMachinesForCustomer, TechnicianForTicket, MachineForTicket } from '@/lib/actions/tickets';
 import { updateTicket } from '@/lib/actions/tickets';
-import { Ticket } from '@/lib/types';
-import { Search, X } from 'lucide-react';
+import { Ticket, TicketMachine } from '@/lib/types';
+import { Search, X, Plus, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { formatDate } from '@/lib/utils';
 
@@ -32,7 +32,14 @@ export function EditTicketModal({ open, onOpenChange, ticket, onSuccess }: EditT
   const debouncedTechnicianSearch = useDebounce(technicianSearch, 300);
   const [showTechnicianDropdown, setShowTechnicianDropdown] = useState(false);
 
+  // Machine editing state
+  const [machines, setMachines] = useState<TicketMachine[]>(ticket.machines);
+  const [customerMachines, setCustomerMachines] = useState<MachineForTicket[]>([]);
+  const [addMachineId, setAddMachineId] = useState('');
+  const [addPriority, setAddPriority] = useState<TicketMachine['priority']>('Medium');
+
   const [formData, setFormData] = useState({
+    briefDescription: ticket.briefDescription || '',
     issueDescription: ticket.issueDescription || '',
     contactPerson: ticket.contactPerson || '',
     internalNotes: ticket.internalNotes || ticket.additionalNotes || '',
@@ -47,6 +54,17 @@ export function EditTicketModal({ open, onOpenChange, ticket, onSuccess }: EditT
   useEffect(() => {
     if (open) {
       loadTechnicians();
+      // Reset machine state
+      setMachines(ticket.machines);
+      setAddMachineId('');
+      setAddPriority('Medium');
+      // Load available machines for this customer
+      const customerId = ticket.machines[0]?.customerId;
+      if (customerId) {
+        getMachinesForCustomer(customerId)
+          .then(setCustomerMachines)
+          .catch(() => setCustomerMachines([]));
+      }
       // Reset form data to current ticket values when opened
       let visitDate = '';
       let visitTime = '';
@@ -59,6 +77,7 @@ export function EditTicketModal({ open, onOpenChange, ticket, onSuccess }: EditT
       }
 
       setFormData({
+        briefDescription: ticket.briefDescription || '',
         issueDescription: ticket.issueDescription || '',
         contactPerson: ticket.contactPerson || '',
         internalNotes: ticket.internalNotes || ticket.additionalNotes || '',
@@ -92,6 +111,37 @@ export function EditTicketModal({ open, onOpenChange, ticket, onSuccess }: EditT
     }
   };
 
+  const handleAddMachine = () => {
+    if (!addMachineId) return;
+    const cm = customerMachines.find((m) => m.id === addMachineId);
+    if (!cm) return;
+    if (machines.some((m) => m.machineId === cm.id)) {
+      showToast.error('Machine already on this ticket');
+      return;
+    }
+    setMachines((prev) => [
+      ...prev,
+      {
+        machineId: cm.id,
+        machineType: cm.type,
+        serialNumber: cm.serialNumber,
+        customerId: cm.customerId,
+        customerName: ticket.machines[0]?.customerName ?? '',
+        priority: addPriority,
+      },
+    ]);
+    setAddMachineId('');
+    setAddPriority('Medium');
+  };
+
+  const handleRemoveMachine = (machineId: string) => {
+    setMachines((prev) => prev.filter((m) => m.machineId !== machineId));
+  };
+
+  const handleMachinePriority = (machineId: string, priority: TicketMachine['priority']) => {
+    setMachines((prev) => prev.map((m) => (m.machineId === machineId ? { ...m, priority } : m)));
+  };
+
   const handleTechnicianSelect = (techId: string, techName: string) => {
     setFormData((prev) => ({
       ...prev,
@@ -109,7 +159,15 @@ export function EditTicketModal({ open, onOpenChange, ticket, onSuccess }: EditT
 
     setSubmitting(true);
     try {
+      if (machines.length === 0) {
+        showToast.error('A ticket must have at least one machine');
+        setSubmitting(false);
+        return;
+      }
+
       const updateData: any = {
+        machines,
+        briefDescription: formData.briefDescription || undefined,
         issueDescription: formData.issueDescription,
         contactPerson: formData.contactPerson,
         internalNotes: formData.internalNotes,
@@ -157,36 +215,96 @@ export function EditTicketModal({ open, onOpenChange, ticket, onSuccess }: EditT
       <DialogContent className='w-full max-w-4xl max-h-[95vh] overflow-y-auto sm:max-w-2xl md:max-w-4xl'>
         <DialogHeader className='sticky top-0 bg-white dark:bg-slate-950 z-10'>
           <DialogTitle>Edit Ticket - {ticket.ticketNumber}</DialogTitle>
-          <DialogDescription>Update ticket details, status, and assignment</DialogDescription>
+          <DialogDescription>
+            Update ticket details, status, and assignment
+            {ticket.createdByName && <span className='ml-2 text-xs text-muted-foreground font-normal'>· Created by {ticket.createdByName}</span>}
+          </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className='space-y-6 py-4'>
-          {/* Ticket Summary - Read Only */}
+          {/* Machines */}
           <div className='space-y-3 pb-4 border-b'>
-            <h3 className='font-semibold text-sm'>Ticket Summary (Read Only)</h3>
-            <div className='grid grid-cols-2 gap-4 text-sm'>
-              <div>
-                <span className='text-slate-500'>Ticket #:</span>
-                <p className='font-medium'>{ticket.ticketNumber}</p>
-              </div>
-              <div>
-                <span className='text-slate-500'>Customer:</span>
-                <p className='font-medium'>{ticket.machines[0]?.customerName || '-'}</p>
-              </div>
+            <div className='flex items-center justify-between'>
+              <h3 className='font-semibold text-sm'>Machines</h3>
+              <span className='text-xs text-muted-foreground'>
+                {machines.length} machine{machines.length !== 1 ? 's' : ''}
+              </span>
             </div>
-            <div>
-              <span className='text-slate-500 text-sm'>Machines:</span>
-              <div className='mt-2 space-y-2'>
-                {ticket.machines.map((machine, idx) => (
-                  <div key={idx} className='flex items-center gap-2 text-sm'>
-                    <Badge variant='outline'>
-                      {machine.machineType} - {machine.serialNumber}
-                    </Badge>
-                    <span className='text-xs text-slate-500'>Priority: {machine.priority}</span>
+
+            {/* Existing machines */}
+            <div className='space-y-2'>
+              {machines.map((machine) => (
+                <div key={machine.machineId} className='flex items-center gap-2 p-2.5 border border-border rounded-lg bg-muted/30'>
+                  <div className='flex-1 min-w-0'>
+                    <p className='text-sm font-medium truncate'>{machine.machineType}</p>
+                    <p className='text-xs text-muted-foreground'>S/N: {machine.serialNumber}</p>
                   </div>
-                ))}
-              </div>
+                  <Select value={machine.priority} onValueChange={(v) => handleMachinePriority(machine.machineId, v as TicketMachine['priority'])}>
+                    <SelectTrigger className='h-7 w-28 text-xs'>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(['Low', 'Medium', 'High', 'Urgent'] as const).map((p) => (
+                        <SelectItem key={p} value={p}>
+                          {p}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <button
+                    type='button'
+                    onClick={() => handleRemoveMachine(machine.machineId)}
+                    className='text-muted-foreground hover:text-destructive transition-colors shrink-0'
+                    title='Remove machine'
+                  >
+                    <Trash2 className='h-4 w-4' />
+                  </button>
+                </div>
+              ))}
             </div>
+
+            {/* Add machine */}
+            {customerMachines.length > 0 && (
+              <div className='space-y-2 pt-1'>
+                <p className='text-xs text-muted-foreground'>
+                  Select a machine from the dropdown, set its priority, then click <strong>+</strong> to add it. To remove a machine, click the delete icon on its row. A ticket must always have at
+                  least one machine.
+                </p>
+                <div className='flex items-center gap-2'>
+                  <Select value={addMachineId} onValueChange={setAddMachineId}>
+                    <SelectTrigger className='flex-1 text-sm'>
+                      <SelectValue placeholder='Add a machine…' />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {customerMachines
+                        .filter((cm) => !machines.some((m) => m.machineId === cm.id))
+                        .map((cm) => (
+                          <SelectItem key={cm.id} value={cm.id}>
+                            {cm.type} — {cm.serialNumber}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  {addMachineId && (
+                    <Select value={addPriority} onValueChange={(v) => setAddPriority(v as TicketMachine['priority'])}>
+                      <SelectTrigger className='w-28 text-sm'>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(['Low', 'Medium', 'High', 'Urgent'] as const).map((p) => (
+                          <SelectItem key={p} value={p}>
+                            {p}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  <Button type='button' size='sm' onClick={handleAddMachine} disabled={!addMachineId}>
+                    <Plus className='h-4 w-4' />
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Editable Fields */}
@@ -200,6 +318,23 @@ export function EditTicketModal({ open, onOpenChange, ticket, onSuccess }: EditT
               onChange={(e) => setFormData((prev) => ({ ...prev, contactPerson: e.target.value }))}
               placeholder='Enter contact person name'
             />
+          </div>
+
+          {/* Brief Description */}
+          <div className='space-y-2'>
+            <Label htmlFor='briefDescription'>
+              Brief Summary
+              <span className='ml-2 text-xs text-muted-foreground font-normal'>shown in ticket list · max 120 chars</span>
+            </Label>
+            <Input
+              id='briefDescription'
+              type='text'
+              value={formData.briefDescription}
+              onChange={(e) => setFormData((prev) => ({ ...prev, briefDescription: e.target.value }))}
+              placeholder='e.g. Machine not holding brew temperature'
+              maxLength={120}
+            />
+            <p className='text-xs text-muted-foreground text-right'>{formData.briefDescription.length} / 120</p>
           </div>
 
           {/* Issue Description */}
@@ -355,6 +490,8 @@ export function EditTicketModal({ open, onOpenChange, ticket, onSuccess }: EditT
                 <SelectContent>
                   <SelectItem value='Open'>Open</SelectItem>
                   <SelectItem value='Assigned'>Assigned</SelectItem>
+                  <SelectItem value='In Progress'>In Progress</SelectItem>
+                  <SelectItem value='Pending Parts'>Pending Parts</SelectItem>
                   <SelectItem value='Closed'>Closed</SelectItem>
                 </SelectContent>
               </Select>

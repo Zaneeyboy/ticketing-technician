@@ -254,7 +254,7 @@ export default function DashboardPage() {
         .map(({ ticket, updatedAt }) => ({
           id: ticket.id,
           title: ticket.ticketNumber,
-          subtitle: `${ticket.machines?.[0]?.customerName || 'Unknown'} â€¢ ${ticket.machines?.[0]?.machineType || 'Unknown'}`,
+          subtitle: `${ticket.machines?.[0]?.customerName || 'Unknown'} \u00b7 ${ticket.machines?.[0]?.machineType || 'Unknown'}`,
           rawDate: updatedAt,
           status: ticket.status,
         }));

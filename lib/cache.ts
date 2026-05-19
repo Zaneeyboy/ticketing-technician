@@ -38,8 +38,7 @@ export function createCachedQuery<T>(fn: () => Promise<T>, tags: string[], keyPa
  */
 export async function revalidateCache(tags: string[]) {
   const { revalidateTag } = await import('next/cache');
-  // Next.js 16 types require a profile arg for the new `use cache` API; cast to the
-  // single-arg form which still works at runtime for `unstable_cache`-based tags.
-  const purge = revalidateTag as unknown as (tag: string) => void;
-  tags.forEach(purge);
+  // Next.js 16: revalidateTag now requires a second argument ('max' for unstable_cache tags).
+  const purge = revalidateTag as unknown as (tag: string, type: 'max') => void;
+  tags.forEach((tag) => purge(tag, 'max'));
 }

@@ -49,37 +49,114 @@ console.log('✓  customers-test.xlsx  (20 rows)');
 
 // ─── Machines ─────────────────────────────────────────────────────────────────
 // NOTE: Customer Name values must match company names uploaded from customers-test.xlsx first.
+// Each customer has 2–4 machines of different types.
 
 const machines: string[][] = [
   ['Serial Number', 'Machine Type', 'Customer Name', 'Location', 'Notes'],
-  ['CRS-2021-0001', 'Crescendo', 'Blue Waters Hotels & Resorts', 'Main Lobby', 'Annual service due Aug 2026'],
-  ['ESP-2019-0042', 'Espresso', 'Carib Coffee Co', 'Counter 1', ''],
-  ['GRD-2020-0015', 'Grinder', 'Carib Coffee Co', 'Counter 1', 'Burr replaced Mar 2025'],
-  ['CRS-2022-0018', 'Crescendo', 'Trini Roast Ltd', 'Front Counter', ''],
-  ['ESP-2021-0033', 'Espresso', 'Island Brew Café', 'Bar Area', ''],
-  ['GRD-2021-0009', 'Grinder', 'Island Brew Café', 'Bar Area', ''],
-  ['CRS-2020-0027', 'Crescendo', 'Coffee Republic', 'Main Floor', 'Older unit, monitor closely'],
-  ['ESP-2023-0005', 'Espresso', 'Savana Grande Hotel', 'Restaurant', 'New install Jan 2023'],
-  ['CRS-2018-0044', 'Crescendo', 'Tobago Plantation Café', 'Counter', 'Due for descale'],
-  ['ESP-2022-0011', 'Espresso', 'Maracas Bay Resort', 'Pool Bar', ''],
-  ['GRD-2022-0003', 'Grinder', 'Maracas Bay Resort', 'Pool Bar', ''],
-  ['CRS-2021-0059', 'Crescendo', 'Pan Espresso Bar', 'Station 1', ''],
-  ['ESP-2021-0060', 'Espresso', 'Pan Espresso Bar', 'Station 2', ''],
-  ['CRS-2019-0031', 'Crescendo', 'Gulf City Mall Food Court', 'Unit A', ''],
-  ['ESP-2020-0022', 'Espresso', 'Hyatt Regency Trinidad', 'Restaurant', ''],
-  ['GRD-2020-0016', 'Grinder', 'Hyatt Regency Trinidad', 'Restaurant', ''],
-  ['CRS-2023-0008', 'Crescendo', 'Meridian Coffee House', 'Main Bar', 'New install'],
-  ['OTH-2021-0037', 'Other', 'Cocoa Lounge Bar', 'VIP Area', 'Cold brew tower'],
-  ['CRS-2022-0013', 'Crescendo', 'Port of Spain Marriott', 'Lobby Café', ''],
-  ['ESP-2023-0002', 'Espresso', 'Airport Lounge TT', 'Terminal 2', ''],
+
+  // Blue Waters Hotels & Resorts (3)
+  ['IPL-2022-0001', 'iPilot Machine', 'Blue Waters Hotels & Resorts', 'Main Lobby', 'Annual service due Aug 2026'],
+  ['EGR-2021-0002', 'EGRO Machine', 'Blue Waters Hotels & Resorts', 'Restaurant Bar', ''],
+  ['WTR-2023-0003', 'Water Machine', 'Blue Waters Hotels & Resorts', 'Back Kitchen', 'Filter replaced Jan 2026'],
+
+  // Carib Coffee Co (3)
+  ['CRS-2020-0004', 'Crescendo Machine', 'Carib Coffee Co', 'Counter 1', ''],
+  ['RAN-2019-0005', 'Rancilio Espresso Machine', 'Carib Coffee Co', 'Counter 2', 'Pump seal replaced Sep 2025'],
+  ['BGD-2021-0006', 'BUNN Grinder', 'Carib Coffee Co', 'Counter 1', 'Burr replaced Mar 2025'],
+
+  // Trini Roast Ltd (3)
+  ['IPL-2022-0007', 'iPilot Machine', 'Trini Roast Ltd', 'Front Counter', ''],
+  ['CRS-2022-0008', 'Crescendo Machine', 'Trini Roast Ltd', 'Back Counter', ''],
+  ['SMW-2023-0009', 'Smartwave Brewer Machine', 'Trini Roast Ltd', 'Staff Break Room', 'New install Mar 2023'],
+
+  // Island Brew Café (3)
+  ['RAN-2021-0010', 'Rancilio Espresso Machine', 'Island Brew Café', 'Bar Area', ''],
+  ['BKY-2022-0011', 'BUNN Kyro Grinder', 'Island Brew Café', 'Bar Area', ''],
+  ['WTR-2021-0012', 'Water Machine', 'Island Brew Café', 'Kitchen', ''],
+
+  // Coffee Republic (3)
+  ['CRS-2020-0013', 'Crescendo Machine', 'Coffee Republic', 'Main Floor', 'Older unit — monitor closely'],
+  ['SIL-2021-0014', 'Silvia Espresso Machine', 'Coffee Republic', 'Brew Station', ''],
+  ['BGD-2022-0015', 'BUNN Grinder', 'Coffee Republic', 'Brew Station', ''],
+
+  // Savana Grande Hotel (3)
+  ['EGR-2023-0016', 'EGRO Machine', 'Savana Grande Hotel', 'Restaurant', 'New install Jan 2023'],
+  ['IPL-2021-0017', 'iPilot Machine', 'Savana Grande Hotel', 'Lobby Café', ''],
+  ['BSV-2022-0018', 'BUNN Server', 'Savana Grande Hotel', 'Conference Room', ''],
+
+  // Tobago Plantation Café (2)
+  ['CRS-2018-0019', 'Crescendo Machine', 'Tobago Plantation Café', 'Counter', 'Due for descale'],
+  ['RAN-2020-0020', 'Rancilio Espresso Machine', 'Tobago Plantation Café', 'Counter', ''],
+
+  // Maracas Bay Resort (3)
+  ['SIL-2022-0021', 'Silvia Espresso Machine', 'Maracas Bay Resort', 'Pool Bar', ''],
+  ['BGD-2022-0022', 'BUNN Grinder', 'Maracas Bay Resort', 'Pool Bar', ''],
+  ['WTR-2020-0023', 'Water Machine', 'Maracas Bay Resort', 'Kitchen', 'Scale build-up noted'],
+
+  // Pan Espresso Bar (3)
+  ['RAN-2021-0024', 'Rancilio Espresso Machine', 'Pan Espresso Bar', 'Station 1', ''],
+  ['BKY-2021-0025', 'BUNN Kyro Grinder', 'Pan Espresso Bar', 'Station 1', ''],
+  ['IPL-2022-0026', 'iPilot Machine', 'Pan Espresso Bar', 'Station 2', ''],
+
+  // Chaguanas Trade Centre (2)
+  ['CRS-2021-0027', 'Crescendo Machine', 'Chaguanas Trade Centre', 'Food Court', ''],
+  ['BRW-2022-0028', 'Brewer Machine', 'Chaguanas Trade Centre', 'Food Court', ''],
+
+  // Gulf City Mall Food Court (3)
+  ['CRS-2019-0029', 'Crescendo Machine', 'Gulf City Mall Food Court', 'Unit A', ''],
+  ['SAM-2021-0030', 'Samremo Grinder', 'Gulf City Mall Food Court', 'Unit A', ''],
+  ['WTR-2022-0031', 'Water Machine', 'Gulf City Mall Food Court', 'Unit B', ''],
+
+  // Hyatt Regency Trinidad (4)
+  ['EGR-2020-0032', 'EGRO Machine', 'Hyatt Regency Trinidad', 'Restaurant', ''],
+  ['BGD-2020-0033', 'BUNN Grinder', 'Hyatt Regency Trinidad', 'Restaurant', ''],
+  ['IPL-2021-0034', 'iPilot Machine', 'Hyatt Regency Trinidad', 'Lobby Lounge', ''],
+  ['BRW-2022-0035', 'Brewer Machine', 'Hyatt Regency Trinidad', 'Conference Suite', ''],
+
+  // Starlite Hotel (2)
+  ['CRS-2022-0036', 'Crescendo Machine', 'Starlite Hotel', 'Breakfast Area', ''],
+  ['RAN-2021-0037', 'Rancilio Espresso Machine', 'Starlite Hotel', 'Breakfast Area', ''],
+
+  // Meridian Coffee House (3)
+  ['IPL-2023-0038', 'iPilot Machine', 'Meridian Coffee House', 'Main Bar', 'New install'],
+  ['SIL-2022-0039', 'Silvia Espresso Machine', 'Meridian Coffee House', 'Main Bar', ''],
+  ['BKY-2022-0040', 'BUNN Kyro Grinder', 'Meridian Coffee House', 'Main Bar', ''],
+
+  // Cocoa Lounge Bar (2)
+  ['NIT-2021-0041', 'Nitron RMV', 'Cocoa Lounge Bar', 'VIP Area', 'Cold brew system'],
+  ['WTR-2021-0042', 'Water Machine', 'Cocoa Lounge Bar', 'Back Bar', ''],
+
+  // Port of Spain Marriott (3)
+  ['EGR-2022-0043', 'EGRO Machine', 'Port of Spain Marriott', 'Lobby Café', ''],
+  ['IPL-2022-0044', 'iPilot Machine', 'Port of Spain Marriott', 'Executive Lounge', ''],
+  ['BSV-2021-0045', 'BUNN Server', 'Port of Spain Marriott', 'Meeting Rooms', ''],
+
+  // Arima Roasters (3)
+  ['CRS-2021-0046', 'Crescendo Machine', 'Arima Roasters', 'Shop Floor', ''],
+  ['BRW-2020-0047', 'Brewer Machine', 'Arima Roasters', 'Shop Floor', ''],
+  ['SAM-2022-0048', 'Samremo Grinder', 'Arima Roasters', 'Shop Floor', ''],
+
+  // River Estate Café (2)
+  ['RAN-2022-0049', 'Rancilio Espresso Machine', 'River Estate Café', 'Counter', ''],
+  ['BGD-2021-0050', 'BUNN Grinder', 'River Estate Café', 'Counter', ''],
+
+  // Airport Lounge TT (3)
+  ['IPL-2023-0051', 'iPilot Machine', 'Airport Lounge TT', 'Terminal 2', ''],
+  ['EGR-2022-0052', 'EGRO Machine', 'Airport Lounge TT', 'Terminal 1', ''],
+  ['CRS-2021-0053', 'Crescendo Machine', 'Airport Lounge TT', 'VIP Lounge', ''],
+
+  // Couva Central Mall (3)
+  ['SMW-2022-0054', 'Smartwave Brewer Machine', 'Couva Central Mall', 'Food Court A', ''],
+  ['BGD-2023-0055', 'BUNN Grinder', 'Couva Central Mall', 'Food Court A', ''],
+  ['WTR-2022-0056', 'Water Machine', 'Couva Central Mall', 'Food Court B', ''],
 ];
 
 const wsMachines = XLSX.utils.aoa_to_sheet(machines);
-wsMachines['!cols'] = [{ wch: 16 }, { wch: 14 }, { wch: 32 }, { wch: 22 }, { wch: 36 }];
+wsMachines['!cols'] = [{ wch: 16 }, { wch: 28 }, { wch: 34 }, { wch: 22 }, { wch: 36 }];
 const wbMachines = XLSX.utils.book_new();
 XLSX.utils.book_append_sheet(wbMachines, wsMachines, 'Machines');
 XLSX.writeFile(wbMachines, path.join(OUT_DIR, 'machines-test.xlsx'));
-console.log('✓  machines-test.xlsx   (20 rows)');
+console.log('✓  machines-test.xlsx   (56 rows — 2-4 machines per customer)');
 
 // ─── Parts ────────────────────────────────────────────────────────────────────
 

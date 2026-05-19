@@ -146,6 +146,7 @@ export async function createTicket(data: any) {
       createdAt: Timestamp.now(),
       updatedAt: Timestamp.now(),
       createdBy: user.uid,
+      createdByName: user.name ?? null,
       statusHistory: [
         {
           status: validated.assignedTo ? 'Assigned' : 'Open',
@@ -389,7 +390,15 @@ export async function addBulkWorkLogEntries(ticketId: string, data: any) {
     }
 
     const { bulkWorkLogSchema } = await import('@/lib/schemas');
-    const validated = bulkWorkLogSchema.parse(data);
+    let validated;
+    try {
+      validated = bulkWorkLogSchema.parse(data);
+    } catch (zodErr: any) {
+      // Surface the first human-readable Zod issue instead of raw JSON
+      const firstIssue = zodErr?.errors?.[0];
+      const message = firstIssue ? `${firstIssue.path.at(-1) ? `${firstIssue.path.at(-1)}: ` : ''}${firstIssue.message}` : 'Invalid work log data';
+      return { success: false, error: message };
+    }
 
     const arrivalTimestamp = Timestamp.fromDate(validated.arrivalTime);
     const departureTimestamp = validated.departureTime ? Timestamp.fromDate(validated.departureTime) : undefined;
@@ -407,6 +416,7 @@ export async function addBulkWorkLogEntries(ticketId: string, data: any) {
         arrivalTime: arrivalTimestamp,
         departureTime: departureTimestamp,
         hoursWorked: validated.hoursWorked,
+        checklistItems: validated.checklistItems ?? [],
         workPerformed: machineLog.workPerformed,
         outcome: machineLog.outcome,
         repairs: machineLog.repairs,
@@ -415,10 +425,11 @@ export async function addBulkWorkLogEntries(ticketId: string, data: any) {
         updatedAt: Timestamp.now(),
       };
 
-      if (machineLog.maintenanceRecommendation?.date && machineLog.maintenanceRecommendation?.notes) {
+      const rec = machineLog.maintenanceRecommendation;
+      if (rec?.date || rec?.notes) {
         workLogData.maintenanceRecommendation = {
-          date: Timestamp.fromDate(machineLog.maintenanceRecommendation.date),
-          notes: machineLog.maintenanceRecommendation.notes,
+          ...(rec.date ? { date: Timestamp.fromDate(rec.date) } : {}),
+          notes: rec.notes || '',
         };
       }
 
@@ -596,6 +607,7 @@ export async function getWorkLogsForTicket(ticketId: string) {
         arrivalTime: data.arrivalTime?.toDate() || null,
         departureTime: data.departureTime?.toDate() || null,
         hoursWorked: data.hoursWorked || 0,
+        checklistItems: (data.checklistItems as number[]) || [],
         partsUsed: data.partsUsed || [],
         maintenanceRecommendation: data.maintenanceRecommendation
           ? {

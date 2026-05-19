@@ -144,6 +144,7 @@ export const createTicketSchema = z.object({
 });
 
 export const updateTicketSchema = z.object({
+  machines: z.array(ticketMachineSchema).min(1, 'At least one machine is required').optional(),
   assignedTo: z.string().optional(),
   briefDescription: z.string().max(120).optional(),
   issueDescription: z.string().min(10).optional(),
@@ -180,13 +181,13 @@ export const technicianUpdateSchema = z.object({
 // Bulk work log schemas for multi-machine work logging
 export const machineSpecificWorkSchema = z.object({
   machineId: z.string().min(1, 'Machine ID is required'),
-  workPerformed: z.string().min(10, 'Please describe the work performed'),
-  outcome: z.string().min(5, 'Please describe the outcome'),
+  workPerformed: z.string().min(4, 'Please describe the work performed'),
+  outcome: z.string().min(4, 'Please describe the outcome'),
   repairs: z.string().optional(),
   partsUsed: z.array(partUsedSchema).optional(),
   maintenanceRecommendation: z
     .object({
-      date: z.date().optional(),
+      date: z.coerce.date().optional(),
       notes: z.string().optional(),
     })
     .optional(),
@@ -194,9 +195,10 @@ export const machineSpecificWorkSchema = z.object({
 
 export const bulkWorkLogSchema = z.object({
   // Visit-level data (common across all machines)
-  arrivalTime: z.date(),
-  departureTime: z.date().optional(),
+  arrivalTime: z.coerce.date(),
+  departureTime: z.coerce.date().optional(),
   hoursWorked: z.number().min(0.25, 'Hours worked must be at least 0.25').max(16, 'Hours worked cannot exceed 16 per shift'),
+  checklistItems: z.array(z.number()).optional(),
 
   // Machine-specific work logs
   machineWorkLogs: z.array(machineSpecificWorkSchema).min(1, 'At least one machine work log is required'),

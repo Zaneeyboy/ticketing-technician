@@ -12,12 +12,73 @@ import { Textarea } from '@/components/ui/textarea';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
 import { addBulkWorkLogEntries, closeTicket, generateSignOffToken, getWorkLogsForTicket } from '@/lib/actions/tickets';
 import { getPartsForSelection, type Part } from '@/lib/actions/parts';
 import { Ticket } from '@/lib/types';
-import { Loader2, CheckCircle, AlertCircle, Trash2, Plus, Wrench, Search, ClipboardCheck } from 'lucide-react';
+import { Loader2, CheckCircle, AlertCircle, Trash2, Plus, Wrench, Search, ClipboardCheck, CalendarIcon, Clock } from 'lucide-react';
 import { showToast } from '@/lib/toast';
+import { format } from 'date-fns';
+
+// ─── Date + Time picker ───────────────────────────────────────────────────────
+// Splits datetime-local into a Calendar popover (date) + <input type="time">
+// (time), which are far less tedious to use than the native datetime-local.
+
+function DateTimePicker({ value, onChange, disabled, placeholder = 'Pick date' }: { value: Date | null | undefined; onChange: (date: Date | null) => void; disabled?: boolean; placeholder?: string }) {
+  const [open, setOpen] = useState(false);
+
+  const date = value ? (value instanceof Date ? value : new Date(value as any)) : null;
+  const timeStr = date ? `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}` : '';
+
+  const handleDaySelect = (day: Date | undefined) => {
+    if (!day) return;
+    const next = date ? new Date(date) : new Date();
+    next.setFullYear(day.getFullYear(), day.getMonth(), day.getDate());
+    onChange(next);
+    setOpen(false);
+  };
+
+  const handleTimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const [h, m] = e.target.value.split(':').map(Number);
+    const next = date ? new Date(date) : new Date();
+    next.setHours(h, m, 0, 0);
+    onChange(next);
+  };
+
+  return (
+    <div className='flex gap-2'>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type='button'
+            disabled={disabled}
+            className={`flex flex-1 items-center gap-2 rounded-md border border-input bg-background px-3 h-9 text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 ${
+              date ? 'text-foreground' : 'text-muted-foreground'
+            }`}
+          >
+            <CalendarIcon className='h-4 w-4 shrink-0 opacity-50' />
+            <span className='flex-1 text-left truncate'>{date ? format(date, 'MMM d, yyyy') : placeholder}</span>
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className='w-auto p-0' align='start'>
+          <Calendar mode='single' selected={date ?? undefined} onSelect={handleDaySelect} autoFocus />
+        </PopoverContent>
+      </Popover>
+
+      <div className='relative flex items-center'>
+        <Clock className='absolute left-2.5 h-4 w-4 text-muted-foreground pointer-events-none' />
+        <input
+          type='time'
+          value={timeStr}
+          onChange={handleTimeChange}
+          disabled={disabled}
+          className='h-9 w-28 rounded-md border border-input bg-background pl-8 pr-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50'
+        />
+      </div>
+    </div>
+  );
+}
 
 // ─── Maintenance checklist (sourced from Caribbean Roasters CoffeeFix Excel) ─
 
@@ -145,7 +206,7 @@ const machineWorkSchema = z.object({
   partsUsed: z.array(partUsedSchema).optional(),
   maintenanceRecommendation: z
     .object({
-      date: z.date().optional(),
+      date: z.coerce.date().optional(),
       notes: z.string().optional(),
     })
     .optional(),
@@ -172,32 +233,14 @@ interface LogWorkModalProps {
   onSuccess?: () => void;
 }
 
-// Helper function to format date for datetime-local input
-const formatDateTimeLocal = (date: Date | null | undefined, includeTime: boolean = true): string => {
-  if (!date) return '';
-
-  const d = date instanceof Date ? date : new Date(date);
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-
-  if (!includeTime) {
-    return `${year}-${month}-${day}`;
-  }
-
-  const hours = String(d.getHours()).padStart(2, '0');
-  const minutes = String(d.getMinutes()).padStart(2, '0');
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
-};
-
 export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: LogWorkModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [closingTicket, setClosingTicket] = useState(false);
   const [signOffUrl, setSignOffUrl] = useState<string | null>(null);
   const [availableParts, setAvailableParts] = useState<Part[]>([]);
   const [partsLoading, setPartsLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState(machines[0]?.machineId || '');
   const [checkedItems, setCheckedItems] = useState<Set<number>>(new Set());
+  const [selectedMachineIds, setSelectedMachineIds] = useState<Set<string>>(() => new Set(machines.map((m) => m.machineId)));
 
   const toggleChecklistItem = (idx: number) =>
     setCheckedItems((prev) => {
@@ -213,6 +256,11 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
     machinesRef.current = machines;
   });
 
+  // Tracks whether the user manually changed any visit-level time field BEFORE
+  // the async Firestore load completed. If true, we skip overwriting their input
+  // with the previously-saved values (prevents a race-condition reset).
+  const visitTimesModifiedRef = useRef(false);
+
   // Track parts per machine
   const [machinePartsMap, setMachinePartsMap] = useState<
     Record<
@@ -225,6 +273,18 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
       }>
     >
   >({});
+
+  const toggleMachineSelection = (machineId: string) => {
+    setSelectedMachineIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(machineId)) {
+        next.delete(machineId);
+      } else {
+        next.add(machineId);
+      }
+      return next;
+    });
+  };
 
   // Get scheduled visit time or default to 8:00 AM today
   const getDefaultArrivalTime = () => {
@@ -267,6 +327,28 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
   useEffect(() => {
     if (isOpen) {
       const currentMachines = machinesRef.current;
+      setSelectedMachineIds(new Set(currentMachines.map((m) => m.machineId)));
+      visitTimesModifiedRef.current = false;
+
+      // Set correct defaults synchronously so the form shows the right values
+      // immediately — before any async work completes. This prevents the field
+      // from jumping after the user has already interacted with it.
+      const defaultArrival = getDefaultArrivalTime();
+      setValue('arrivalTime', defaultArrival);
+      setValue('departureTime', new Date());
+      setValue('hoursWorked', 0);
+      setValue(
+        'machineWorkLogs',
+        currentMachines.map((m) => ({
+          machineId: m.machineId,
+          workPerformed: '',
+          outcome: '',
+          repairs: '',
+          partsUsed: [],
+        })),
+      );
+      setMachinePartsMap({});
+
       const loadData = async () => {
         // Load available parts first
         setPartsLoading(true);
@@ -293,10 +375,20 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
             // Work logs exist, populate form with existing data
             const firstLog = workLogsResult.workLogs[0];
 
-            // Set visit-level data from first log (they're all the same)
-            setValue('arrivalTime', firstLog.arrivalTime || getDefaultArrivalTime());
-            setValue('departureTime', firstLog.departureTime || new Date());
-            setValue('hoursWorked', firstLog.hoursWorked || 0);
+            // Set visit-level data from first log (they're all the same).
+            // Only apply if the user hasn't already touched these fields — this
+            // prevents a race condition where the async load overwrites changes
+            // the user made while the load was in progress.
+            if (!visitTimesModifiedRef.current) {
+              setValue('arrivalTime', firstLog.arrivalTime || getDefaultArrivalTime());
+              setValue('departureTime', firstLog.departureTime || new Date());
+              setValue('hoursWorked', firstLog.hoursWorked || 0);
+            }
+
+            // Restore checklist state
+            if (firstLog.checklistItems && firstLog.checklistItems.length > 0) {
+              setCheckedItems(new Set(firstLog.checklistItems));
+            }
 
             // Create a map of existing work logs by machineId
             const workLogsByMachine = new Map();
@@ -313,7 +405,13 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
                 outcome: existingLog?.outcome || '',
                 repairs: existingLog?.repairs || '',
                 partsUsed: existingLog?.partsUsed || [],
-                maintenanceRecommendation: existingLog?.maintenanceRecommendation || undefined,
+                maintenanceRecommendation: existingLog?.maintenanceRecommendation
+                  ? {
+                      // type="date" inputs require a "YYYY-MM-DD" string, not a Date object
+                      date: existingLog.maintenanceRecommendation.date ? (format(existingLog.maintenanceRecommendation.date, 'yyyy-MM-dd') as any) : '',
+                      notes: existingLog.maintenanceRecommendation.notes || '',
+                    }
+                  : undefined,
               };
             });
 
@@ -337,27 +435,8 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
             });
             setMachinePartsMap(newPartsMap);
           } else {
-            // No existing work logs, use defaults
-            const defaultArrival = getDefaultArrivalTime();
-            const defaultDeparture = new Date();
-
-            setValue('arrivalTime', defaultArrival);
-            setValue('departureTime', defaultDeparture);
-            setValue('hoursWorked', 0);
-
-            // Initialize machine work logs with empty data
-            setValue(
-              'machineWorkLogs',
-              currentMachines.map((m) => ({
-                machineId: m.machineId,
-                workPerformed: '',
-                outcome: '',
-                repairs: '',
-                partsUsed: [],
-              })),
-            );
-
-            setMachinePartsMap({});
+            // No existing work logs — defaults were already set synchronously
+            // above before the async load started, so nothing to do here.
           }
         } catch (error) {
           console.error('Error loading work logs:', error);
@@ -384,15 +463,20 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
   }, [arrivalTime, departureTime, setValue]);
 
   const onSubmit = async (data: BulkWorkLogFormData) => {
-    // Validate that all machines have required data
-    const invalidMachines = data.machineWorkLogs.filter((m) => !m.workPerformed || !m.outcome);
+    if (selectedMachineIds.size === 0) {
+      showToast.error('Select at least one machine to log work against');
+      return;
+    }
+    // Validate that all selected machines have required data
+    const invalidMachines = data.machineWorkLogs.filter((m) => selectedMachineIds.has(m.machineId) && (!m.workPerformed || !m.outcome));
     if (invalidMachines.length > 0) {
-      showToast.error('Please fill in work performed and outcome for all machines');
+      showToast.error('Please fill in work performed and outcome for all serviced machines');
       return;
     }
 
-    // Validate parts quantities don't exceed stock
+    // Validate parts quantities don't exceed stock (selected machines only)
     for (const [machineId, parts] of Object.entries(machinePartsMap)) {
+      if (!selectedMachineIds.has(machineId)) continue;
       if (parts && parts.length > 0) {
         for (const part of parts) {
           if (!part.partId || !part.partName) {
@@ -411,23 +495,26 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
     setSubmitting(true);
     try {
       // Attach parts to each machine's work log
-      const machineWorkLogsWithParts = data.machineWorkLogs.map((log) => {
-        const machineParts = machinePartsMap[log.machineId] || [];
-        const partsToSubmit = machineParts.map((p) => {
-          const { availableQty, ...rest } = p;
-          return rest;
-        });
+      const machineWorkLogsWithParts = data.machineWorkLogs
+        .filter((log) => selectedMachineIds.has(log.machineId))
+        .map((log) => {
+          const machineParts = machinePartsMap[log.machineId] || [];
+          const partsToSubmit = machineParts.map((p) => {
+            const { availableQty, ...rest } = p;
+            return rest;
+          });
 
-        return {
-          ...log,
-          partsUsed: partsToSubmit.length > 0 ? partsToSubmit : undefined,
-        };
-      });
+          return {
+            ...log,
+            partsUsed: partsToSubmit.length > 0 ? partsToSubmit : undefined,
+          };
+        });
 
       const result = await addBulkWorkLogEntries(ticket.id, {
         arrivalTime: data.arrivalTime,
         departureTime: data.departureTime,
         hoursWorked: data.hoursWorked,
+        checklistItems: [...checkedItems],
         machineWorkLogs: machineWorkLogsWithParts,
       });
 
@@ -473,15 +560,20 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
   };
 
   const handleSaveAndClose = async (data: BulkWorkLogFormData) => {
-    // Validate that all machines have required data
-    const invalidMachines = data.machineWorkLogs.filter((m) => !m.workPerformed || !m.outcome);
+    if (selectedMachineIds.size === 0) {
+      showToast.error('Select at least one machine to log work against');
+      return;
+    }
+    // Validate that all selected machines have required data
+    const invalidMachines = data.machineWorkLogs.filter((m) => selectedMachineIds.has(m.machineId) && (!m.workPerformed || !m.outcome));
     if (invalidMachines.length > 0) {
-      showToast.error('Please fill in work performed and outcome for all machines');
+      showToast.error('Please fill in work performed and outcome for all serviced machines');
       return;
     }
 
-    // Validate parts quantities don't exceed stock
+    // Validate parts quantities don't exceed stock (selected machines only)
     for (const [machineId, parts] of Object.entries(machinePartsMap)) {
+      if (!selectedMachineIds.has(machineId)) continue;
       if (parts && parts.length > 0) {
         for (const part of parts) {
           if (!part.partId || !part.partName) {
@@ -500,23 +592,26 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
     setSubmitting(true);
     try {
       // Attach parts to each machine's work log
-      const machineWorkLogsWithParts = data.machineWorkLogs.map((log) => {
-        const machineParts = machinePartsMap[log.machineId] || [];
-        const partsToSubmit = machineParts.map((p) => {
-          const { availableQty, ...rest } = p;
-          return rest;
-        });
+      const machineWorkLogsWithParts = data.machineWorkLogs
+        .filter((log) => selectedMachineIds.has(log.machineId))
+        .map((log) => {
+          const machineParts = machinePartsMap[log.machineId] || [];
+          const partsToSubmit = machineParts.map((p) => {
+            const { availableQty, ...rest } = p;
+            return rest;
+          });
 
-        return {
-          ...log,
-          partsUsed: partsToSubmit.length > 0 ? partsToSubmit : undefined,
-        };
-      });
+          return {
+            ...log,
+            partsUsed: partsToSubmit.length > 0 ? partsToSubmit : undefined,
+          };
+        });
 
       const result = await addBulkWorkLogEntries(ticket.id, {
         arrivalTime: data.arrivalTime,
         departureTime: data.departureTime,
         hoursWorked: data.hoursWorked,
+        checklistItems: [...checkedItems],
         machineWorkLogs: machineWorkLogsWithParts,
       });
 
@@ -606,16 +701,18 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
               <div className='grid grid-cols-1 sm:grid-cols-2 gap-3'>
                 {/* Arrival Time */}
                 <div className='space-y-2'>
-                  <Label htmlFor='arrivalTime'>Arrival Time *</Label>
+                  <Label>Arrival Time *</Label>
                   <Controller
                     name='arrivalTime'
                     control={control}
                     render={({ field }) => (
-                      <Input
-                        id='arrivalTime'
-                        type='datetime-local'
-                        value={field.value ? formatDateTimeLocal(field.value) : ''}
-                        onChange={(e) => field.onChange(e.target.value ? new Date(e.target.value) : null)}
+                      <DateTimePicker
+                        value={field.value}
+                        onChange={(d) => {
+                          visitTimesModifiedRef.current = true;
+                          field.onChange(d);
+                        }}
+                        placeholder='Pick arrival date'
                       />
                     )}
                   />
@@ -630,16 +727,18 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
 
                 {/* Departure Time */}
                 <div className='space-y-2'>
-                  <Label htmlFor='departureTime'>Departure Time (Optional)</Label>
+                  <Label>Departure Time (Optional)</Label>
                   <Controller
                     name='departureTime'
                     control={control}
                     render={({ field }) => (
-                      <Input
-                        id='departureTime'
-                        type='datetime-local'
-                        value={field.value ? formatDateTimeLocal(field.value) : ''}
-                        onChange={(e) => field.onChange(e.target.value ? new Date(e.target.value) : null)}
+                      <DateTimePicker
+                        value={field.value}
+                        onChange={(d) => {
+                          visitTimesModifiedRef.current = true;
+                          field.onChange(d);
+                        }}
+                        placeholder='Pick departure date'
                       />
                     )}
                   />
@@ -674,164 +773,216 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
               <CardTitle className='text-sm'>Machine-Specific Work Details</CardTitle>
               <p className='text-xs text-slate-600 dark:text-slate-400'>Fill in work details for each machine serviced</p>
             </CardHeader>
-            <CardContent>
-              <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <div className='overflow-x-auto pb-1 -mx-1 px-1'>
-                  <TabsList className='flex min-w-max gap-1'>
-                    {machines.map((machine) => (
-                      <TabsTrigger key={machine.machineId} value={machine.machineId} className='text-xs shrink-0'>
-                        <span className='max-w-[90px] truncate sm:max-w-none'>{machine.machineType}</span>
-                        <Badge variant='outline' className='ml-1 text-[10px] px-1 hidden sm:inline-flex'>
-                          {machine.serialNumber}
-                        </Badge>
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
-                </div>
-
-                {machines.map((machine, machineIdx) => {
-                  const machineParts = machinePartsMap[machine.machineId] || [];
-
-                  return (
-                    <TabsContent key={machine.machineId} value={machine.machineId} className='space-y-4 mt-4'>
-                      {/* Work Performed */}
-                      <div className='space-y-2'>
-                        <Label htmlFor={`work-${machineIdx}`}>Work Performed *</Label>
-                        <Textarea
-                          id={`work-${machineIdx}`}
-                          placeholder={`Describe the work performed on this ${machine.machineType}...`}
-                          className='min-h-20'
-                          {...register(`machineWorkLogs.${machineIdx}.workPerformed`)}
-                        />
-                        {errors.machineWorkLogs?.[machineIdx]?.workPerformed && (
-                          <p className='text-sm text-red-500 flex items-center gap-1'>
-                            <AlertCircle className='h-3 w-3' />
-                            {errors.machineWorkLogs[machineIdx]?.workPerformed?.message}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Repairs */}
-                      <div className='space-y-2'>
-                        <Label htmlFor={`repairs-${machineIdx}`}>Repairs & Fixes</Label>
-                        <Textarea
-                          id={`repairs-${machineIdx}`}
-                          placeholder='Document any repairs, fixes, or replacements made...'
-                          className='min-h-16'
-                          {...register(`machineWorkLogs.${machineIdx}.repairs`)}
-                        />
-                      </div>
-
-                      {/* Parts Used */}
-                      <div className='space-y-3'>
-                        <div className='flex items-center justify-between'>
-                          <Label>Parts Used on This Machine</Label>
-                          <Button
-                            type='button'
-                            variant='outline'
-                            size='sm'
-                            onClick={() => addPartToMachine(machine.machineId)}
-                            disabled={availableParts.length === 0 || partsLoading}
-                            className='gap-1'
+            <CardContent className='space-y-5'>
+              {/* Machine selection — shown for multi-machine tickets only */}
+              {machines.length > 1 && (
+                <div className='space-y-2 pb-4 border-b border-border'>
+                  <Label className='text-sm font-medium'>Which machines did you service this visit? *</Label>
+                  <div className='flex flex-wrap gap-2'>
+                    {machines.map((machine) => {
+                      const selected = selectedMachineIds.has(machine.machineId);
+                      return (
+                        <button
+                          key={machine.machineId}
+                          type='button'
+                          onClick={() => toggleMachineSelection(machine.machineId)}
+                          className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${
+                            selected ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-muted/30 text-muted-foreground hover:bg-muted/60'
+                          }`}
+                        >
+                          <span
+                            className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                              selected ? 'border-primary bg-primary' : 'border-muted-foreground/40 bg-background'
+                            }`}
                           >
-                            <Plus className='h-3 w-3' />
-                            Add Part
-                          </Button>
+                            {selected && (
+                              <svg className='h-2.5 w-2.5 text-primary-foreground' viewBox='0 0 12 10' fill='none'>
+                                <path d='M1 5l3.5 3.5L11 1' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' />
+                              </svg>
+                            )}
+                          </span>
+                          <span className='font-medium'>{machine.machineType}</span>
+                          <span className='text-xs opacity-60'>{machine.serialNumber}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {selectedMachineIds.size === 0 && (
+                    <p className='text-xs text-destructive flex items-center gap-1'>
+                      <AlertCircle className='h-3.5 w-3.5 shrink-0' />
+                      Select at least one machine to log work against.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {selectedMachineIds.size === 0 ? (
+                <p className='py-6 text-center text-sm text-muted-foreground'>Select at least one machine above to enter work details.</p>
+              ) : (
+                <div className='space-y-4'>
+                  {machines.map((machine, machineIdx) => {
+                    if (!selectedMachineIds.has(machine.machineId)) return null;
+                    const machineParts = machinePartsMap[machine.machineId] || [];
+                    const hasWork = !!(watch(`machineWorkLogs.${machineIdx}.workPerformed`) || watch(`machineWorkLogs.${machineIdx}.outcome`));
+
+                    return (
+                      <div key={machine.machineId} className='rounded-lg border border-border overflow-hidden'>
+                        {/* Machine header */}
+                        <div className='flex items-center gap-2.5 px-4 py-3 bg-muted/50 border-b border-border'>
+                          <Wrench className='h-3.5 w-3.5 text-muted-foreground shrink-0' />
+                          <span className='text-sm font-semibold'>{machine.machineType}</span>
+                          <Badge variant='outline' className='text-xs font-mono'>
+                            {machine.serialNumber}
+                          </Badge>
+                          {hasWork && (
+                            <span className='ml-auto flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 font-medium'>
+                              <CheckCircle className='h-3.5 w-3.5' />
+                              Filled
+                            </span>
+                          )}
                         </div>
 
-                        {partsLoading ? (
-                          <p className='text-xs text-slate-500 dark:text-slate-400'>Loading parts...</p>
-                        ) : machineParts.length > 0 ? (
+                        <div className='p-4 space-y-4'>
+                          {/* Work Performed */}
                           <div className='space-y-2'>
-                            {machineParts.map((part, partIdx) => {
-                              const selectedPart = availableParts.find((p) => p.id === part.partId);
-                              const maxQty = selectedPart?.quantityInStock || 0;
-                              const isQtyInvalid = part.quantity > maxQty;
-
-                              return (
-                                <div key={`${machine.machineId}-part-${partIdx}`} className='flex gap-2 items-center'>
-                                  <PartSearchCombobox
-                                    parts={availableParts}
-                                    value={part.partId || ''}
-                                    disabled={partsLoading}
-                                    onSelect={(selected) => {
-                                      updatePartForMachine(machine.machineId, partIdx, {
-                                        partId: selected.id,
-                                        partName: selected.name,
-                                        quantity: 1,
-                                        availableQty: selected.quantityInStock,
-                                      });
-                                    }}
-                                  />
-                                  <div className='w-24 space-y-1'>
-                                    <div className='text-xs text-slate-500 dark:text-slate-400'>Qty (Max: {maxQty})</div>
-                                    <Input
-                                      type='number'
-                                      min='1'
-                                      max={maxQty}
-                                      value={part.quantity}
-                                      onChange={(e) => {
-                                        const newQty = Math.min(parseInt(e.target.value) || 1, maxQty);
-                                        updatePartForMachine(machine.machineId, partIdx, { quantity: newQty });
-                                      }}
-                                      className={`bg-slate-50 dark:bg-slate-900 text-sm ${isQtyInvalid ? 'border-red-500' : ''}`}
-                                    />
-                                    {isQtyInvalid && <p className='text-xs text-red-500'>Exceeds stock</p>}
-                                  </div>
-                                  <Button
-                                    type='button'
-                                    variant='ghost'
-                                    size='sm'
-                                    onClick={() => removePartFromMachine(machine.machineId, partIdx)}
-                                    className='h-9 w-9 p-0 text-red-500 hover:text-red-700 dark:hover:text-red-400'
-                                  >
-                                    <Trash2 className='h-4 w-4' />
-                                  </Button>
-                                </div>
-                              );
-                            })}
+                            <Label htmlFor={`work-${machineIdx}`}>Work Performed *</Label>
+                            <Textarea
+                              id={`work-${machineIdx}`}
+                              placeholder={`Describe the work performed on this ${machine.machineType}...`}
+                              className='min-h-20'
+                              {...register(`machineWorkLogs.${machineIdx}.workPerformed`)}
+                            />
+                            {errors.machineWorkLogs?.[machineIdx]?.workPerformed && (
+                              <p className='text-sm text-red-500 flex items-center gap-1'>
+                                <AlertCircle className='h-3 w-3' />
+                                {errors.machineWorkLogs[machineIdx]?.workPerformed?.message}
+                              </p>
+                            )}
                           </div>
-                        ) : (
-                          <p className='text-xs text-slate-500 dark:text-slate-400'>{availableParts.length === 0 ? 'No parts available in stock' : 'No parts added yet'}</p>
-                        )}
-                      </div>
 
-                      {/* Outcome */}
-                      <div className='space-y-2'>
-                        <Label htmlFor={`outcome-${machineIdx}`}>Outcome *</Label>
-                        <Textarea
-                          id={`outcome-${machineIdx}`}
-                          placeholder='Describe the outcome of the work and machine status...'
-                          className='min-h-20'
-                          {...register(`machineWorkLogs.${machineIdx}.outcome`)}
-                        />
-                        {errors.machineWorkLogs?.[machineIdx]?.outcome && (
-                          <p className='text-sm text-red-500 flex items-center gap-1'>
-                            <AlertCircle className='h-3 w-3' />
-                            {errors.machineWorkLogs[machineIdx]?.outcome?.message}
-                          </p>
-                        )}
-                      </div>
+                          {/* Repairs */}
+                          <div className='space-y-2'>
+                            <Label htmlFor={`repairs-${machineIdx}`}>Repairs &amp; Fixes</Label>
+                            <Textarea
+                              id={`repairs-${machineIdx}`}
+                              placeholder='Document any repairs, fixes, or replacements made...'
+                              className='min-h-16'
+                              {...register(`machineWorkLogs.${machineIdx}.repairs`)}
+                            />
+                          </div>
 
-                      {/* Maintenance Recommendation */}
-                      <div className='space-y-3 p-3 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700'>
-                        <Label>Maintenance Recommendation (Optional)</Label>
-                        <div className='flex gap-2'>
-                          <Input
-                            type='date'
-                            placeholder='Recommended date'
-                            className='flex-1'
-                            {...register(`machineWorkLogs.${machineIdx}.maintenanceRecommendation.date`, {
-                              setValueAs: (value) => (value === '' ? undefined : new Date(value)),
-                            })}
-                          />
+                          {/* Parts Used */}
+                          <div className='space-y-3'>
+                            <div className='flex items-center justify-between'>
+                              <Label>Parts Used on This Machine</Label>
+                              <Button
+                                type='button'
+                                variant='outline'
+                                size='sm'
+                                onClick={() => addPartToMachine(machine.machineId)}
+                                disabled={availableParts.length === 0 || partsLoading}
+                                className='gap-1'
+                              >
+                                <Plus className='h-3 w-3' />
+                                Add Part
+                              </Button>
+                            </div>
+
+                            {partsLoading ? (
+                              <p className='text-xs text-slate-500 dark:text-slate-400'>Loading parts...</p>
+                            ) : machineParts.length > 0 ? (
+                              <div className='space-y-2'>
+                                {machineParts.map((part, partIdx) => {
+                                  const selectedPart = availableParts.find((p) => p.id === part.partId);
+                                  const maxQty = selectedPart?.quantityInStock || 0;
+                                  const isQtyInvalid = part.quantity > maxQty;
+
+                                  return (
+                                    <div key={`${machine.machineId}-part-${partIdx}`} className='flex gap-2 items-center'>
+                                      <PartSearchCombobox
+                                        parts={availableParts}
+                                        value={part.partId || ''}
+                                        disabled={partsLoading}
+                                        onSelect={(selected) => {
+                                          updatePartForMachine(machine.machineId, partIdx, {
+                                            partId: selected.id,
+                                            partName: selected.name,
+                                            quantity: 1,
+                                            availableQty: selected.quantityInStock,
+                                          });
+                                        }}
+                                      />
+                                      <div className='w-24 space-y-1'>
+                                        <div className='text-xs text-slate-500 dark:text-slate-400'>Qty (Max: {maxQty})</div>
+                                        <Input
+                                          type='number'
+                                          min='1'
+                                          max={maxQty}
+                                          value={part.quantity}
+                                          onChange={(e) => {
+                                            const newQty = Math.min(parseInt(e.target.value) || 1, maxQty);
+                                            updatePartForMachine(machine.machineId, partIdx, { quantity: newQty });
+                                          }}
+                                          className={`bg-slate-50 dark:bg-slate-900 text-sm ${isQtyInvalid ? 'border-red-500' : ''}`}
+                                        />
+                                        {isQtyInvalid && <p className='text-xs text-red-500'>Exceeds stock</p>}
+                                      </div>
+                                      <Button
+                                        type='button'
+                                        variant='ghost'
+                                        size='sm'
+                                        onClick={() => removePartFromMachine(machine.machineId, partIdx)}
+                                        className='h-9 w-9 p-0 text-red-500 hover:text-red-700 dark:hover:text-red-400'
+                                      >
+                                        <Trash2 className='h-4 w-4' />
+                                      </Button>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <p className='text-xs text-slate-500 dark:text-slate-400'>{availableParts.length === 0 ? 'No parts available in stock' : 'No parts added for this machine yet'}</p>
+                            )}
+                          </div>
+
+                          {/* Outcome */}
+                          <div className='space-y-2'>
+                            <Label htmlFor={`outcome-${machineIdx}`}>Outcome *</Label>
+                            <Textarea
+                              id={`outcome-${machineIdx}`}
+                              placeholder='Describe the outcome of the work and machine status...'
+                              className='min-h-20'
+                              {...register(`machineWorkLogs.${machineIdx}.outcome`)}
+                            />
+                            {errors.machineWorkLogs?.[machineIdx]?.outcome && (
+                              <p className='text-sm text-red-500 flex items-center gap-1'>
+                                <AlertCircle className='h-3 w-3' />
+                                {errors.machineWorkLogs[machineIdx]?.outcome?.message}
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Maintenance Recommendation */}
+                          <div className='space-y-3 p-3 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700'>
+                            <Label>Maintenance Recommendation (Optional)</Label>
+                            <div className='flex gap-2'>
+                              <Input
+                                type='date'
+                                placeholder='Recommended date'
+                                className='flex-1'
+                                {...register(`machineWorkLogs.${machineIdx}.maintenanceRecommendation.date`, {
+                                  setValueAs: (value) => (value === '' ? undefined : new Date(value)),
+                                })}
+                              />
+                            </div>
+                            <Textarea placeholder='Recommended maintenance or next steps...' className='min-h-16' {...register(`machineWorkLogs.${machineIdx}.maintenanceRecommendation.notes`)} />
+                          </div>
                         </div>
-                        <Textarea placeholder='Recommended maintenance or next steps...' className='min-h-16' {...register(`machineWorkLogs.${machineIdx}.maintenanceRecommendation.notes`)} />
                       </div>
-                    </TabsContent>
-                  );
-                })}
-              </Tabs>
+                    );
+                  })}
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -971,7 +1122,7 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
           {/* Submit Buttons */}
           {!signOffUrl && (
             <div className='flex flex-col-reverse sm:flex-row gap-3 pt-4'>
-              <Button type='submit' disabled={submitting || closingTicket} className='flex-1 sm:flex-1'>
+              <Button type='submit' disabled={submitting || closingTicket || selectedMachineIds.size === 0} className='flex-1 sm:flex-1'>
                 {submitting ? (
                   <>
                     <Loader2 className='h-4 w-4 mr-2 animate-spin' />
@@ -987,7 +1138,7 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
               <Button
                 type='button'
                 onClick={handleSubmit(handleSaveAndClose)}
-                disabled={submitting || closingTicket || !formState.isValid || checkedItems.size === 0}
+                disabled={submitting || closingTicket || !formState.isValid || selectedMachineIds.size === 0}
                 className='flex-1 bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-800'
               >
                 {closingTicket ? (

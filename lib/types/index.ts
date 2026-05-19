@@ -262,6 +262,7 @@ export interface Ticket {
 
   // Metadata
   createdBy: string;
+  createdByName?: string; // Denormalized display name of the ticket creator
 
   // Status audit trail — appended on every status change
   statusHistory?: StatusHistoryEntry[];

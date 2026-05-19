@@ -1,7 +1,8 @@
 'use client';
 
 import * as XLSX from 'xlsx';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
+import { clientCache } from '@/lib/client-cache';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { useRouter } from 'next/navigation';
 import { showToast } from '@/lib/toast';
@@ -19,7 +20,7 @@ import { ColumnDef, flexRender, getCoreRowModel, getFilteredRowModel, getPaginat
 import { Machine, Customer, MachinePart } from '@/lib/types';
 import { getMachines, createMachine, updateMachine, deleteMachine, bulkCreateMachines, getMachineTypes, addMachineType, setMachineAssociatedParts, type BulkMachineRow } from '@/lib/actions/machines';
 import { getCustomers } from '@/lib/actions/customers';
-import { Plus, Edit2, Trash2, Eye, ArrowUpDown, Upload, Download, Wrench, X, Package, ChevronsUpDown } from 'lucide-react';
+import { Plus, Edit2, Trash2, Eye, ArrowUpDown, Upload, Download, Wrench, X, Package, ChevronsUpDown, Users, LayoutGrid } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { getParts, type Part } from '@/lib/actions/parts';
@@ -277,11 +278,33 @@ export default function MachinesPage() {
   const [submitting, setSubmitting] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
 
+  // ── Client-side cache ─────────────────────────────────────────────────────
+  // Runs synchronously before browser paint: if cached data exists, populate
+  // state immediately so the skeleton never appears on repeat visits.
+  useLayoutEffect(() => {
+    if (authLoading || !user?.storeId) return;
+    const cached = clientCache.get<{
+      machines: Machine[];
+      customers: Customer[];
+      machineTypes: string[];
+      parts: Part[];
+    }>(`machines:${user.storeId}`);
+    if (!cached) return;
+    setMachines(cached.machines);
+    setCustomers(cached.customers);
+    setMachineTypes(cached.machineTypes);
+    setParts(cached.parts);
+    setLoading(false);
+  }, [authLoading, user?.storeId]);
+
   // Stats
   const typeCounts = machines.reduce<Record<string, number>>((acc, m) => {
     acc[m.type] = (acc[m.type] || 0) + 1;
     return acc;
   }, {});
+  const uniqueTypeCount = Object.keys(typeCounts).length;
+  const topType = Object.entries(typeCounts).sort(([, a], [, b]) => b - a)[0] ?? null;
+  const uniqueCustomerCount = new Set(machines.map((m) => m.customerId)).size;
 
   // Bulk upload helpers
   const downloadTemplate = () => {
@@ -316,6 +339,34 @@ export default function MachinesPage() {
     }
   };
 
+  const loadData = useCallback(async () => {
+    if (!user?.storeId) return;
+    const storeId = user.storeId;
+    try {
+      const [machinesData, customersData, typesData, partsData] = await Promise.all([getMachines(), getCustomers(), getMachineTypes(), getParts()]);
+      const machines = machinesData as unknown as Machine[];
+      const customers = customersData.filter((c) => !c.isDisabled) as unknown as Customer[];
+      const machineTypes = typesData;
+      const parts = partsData;
+      // Persist in client cache so repeat visits skip the skeleton
+      clientCache.set(`machines:${storeId}`, { machines, customers, machineTypes, parts });
+      setMachines(machines);
+      setCustomers(customers);
+      setMachineTypes(machineTypes);
+      setParts(parts);
+    } catch (error) {
+      console.error('Error loading data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.storeId]);
+
+  /** Invalidate client cache then reload — call after any mutation. */
+  const reloadData = useCallback(async () => {
+    if (user?.storeId) clientCache.invalidate(`machines:${user.storeId}`);
+    await loadData();
+  }, [user?.storeId, loadData]);
+
   useEffect(() => {
     if (authLoading) return;
     if (!user || !['store_admin', 'store_manager', 'call_admin'].includes(user.role)) {
@@ -324,147 +375,165 @@ export default function MachinesPage() {
     }
     if (!user.storeId) return;
     loadData();
-  }, [user, authLoading]);
+  }, [user, authLoading, loadData, router]);
 
-  const loadData = async () => {
-    if (!user?.storeId) return;
-    try {
-      const [machinesData, customersData, typesData, partsData] = await Promise.all([getMachines(), getCustomers(), getMachineTypes(), getParts()]);
-      setMachines(machinesData as unknown as Machine[]);
-      setCustomers(customersData.filter((c) => !c.isDisabled) as unknown as Customer[]);
-      setMachineTypes(typesData);
-      setParts(partsData);
-    } catch (error) {
-      console.error('Error loading data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleEdit = (machine: Machine) => {
+  const handleEdit = useCallback((machine: Machine) => {
     setEditingMachine(machine);
     setDialogOpen(true);
-  };
+  }, []);
 
-  const handleView = (machine: Machine) => {
+  const handleView = useCallback((machine: Machine) => {
     setViewingMachine(machine);
     setViewDialogOpen(true);
-  };
+  }, []);
 
-  const handleDelete = async (machine: Machine) => {
-    setSubmitting(true);
-    try {
-      const result = await deleteMachine(machine.id);
-      if (result.success) {
-        showToast.success('Machine deleted successfully');
-        setMachines(machines.filter((m) => m.id !== machine.id));
-        setDeleteDialog(null);
-      } else {
-        showToast.error(result.error || 'Failed to delete machine');
+  const handleDelete = useCallback(
+    async (machine: Machine) => {
+      setSubmitting(true);
+      try {
+        const result = await deleteMachine(machine.id);
+        if (result.success) {
+          showToast.success('Machine deleted successfully');
+          setMachines((prev) => {
+            const next = prev.filter((m) => m.id !== machine.id);
+            // Keep client cache in sync with the optimistic removal
+            if (user?.storeId) {
+              const key = `machines:${user.storeId}`;
+              const cached = clientCache.get<{ machines: Machine[]; customers: Customer[]; machineTypes: string[]; parts: Part[] }>(key);
+              if (cached) clientCache.set(key, { ...cached, machines: next });
+            }
+            return next;
+          });
+          setDeleteDialog(null);
+        } else {
+          showToast.error(result.error || 'Failed to delete machine');
+        }
+      } finally {
+        setSubmitting(false);
       }
-    } finally {
-      setSubmitting(false);
-    }
-  };
+    },
+    [user?.storeId],
+  );
 
-  const openNewDialog = () => {
+  const openNewDialog = useCallback(() => {
     setEditingMachine(null);
     setDialogOpen(true);
-  };
+  }, []);
 
-  const getCustomerName = (customerId: string) => {
-    return customers.find((c) => c.id === customerId)?.companyName || 'Unknown';
-  };
+  const getCustomerName = useCallback(
+    (customerId: string) => {
+      return customers.find((c) => c.id === customerId)?.companyName || 'Unknown';
+    },
+    [customers],
+  );
 
-  const columns: ColumnDef<Machine>[] = [
-    {
-      accessorKey: 'customerId',
-      header: ({ column }) => (
-        <Button variant='ghost' onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
-          Customer
-          <ArrowUpDown className='ml-2 h-4 w-4' />
-        </Button>
-      ),
-      cell: ({ row }) => <div className='font-medium'>{getCustomerName(row.getValue('customerId'))}</div>,
-    },
-    {
-      accessorKey: 'type',
-      header: ({ column }) => (
-        <Button variant='ghost' onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
-          Type
-          <ArrowUpDown className='ml-2 h-4 w-4' />
-        </Button>
-      ),
-      cell: ({ row }) => {
-        const type = row.getValue('type') as string;
-        const colorMap: Record<string, string> = {
-          Crescendo: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
-          Espresso: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200',
-          Grinder: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
-          Brewer: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
-          'Cold Brew': 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200',
-          'Water Dispenser': 'bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-200',
-          'Vending Machine': 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200',
-          Other: 'bg-slate-100 text-slate-800 dark:bg-slate-900 dark:text-slate-200',
-        };
-        return <Badge className={colorMap[type] || colorMap.Other}>{type}</Badge>;
+  const columns = useMemo<ColumnDef<Machine>[]>(
+    () => [
+      {
+        accessorKey: 'customerId',
+        header: ({ column }) => (
+          <Button variant='ghost' onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
+            Customer
+            <ArrowUpDown className='ml-2 h-4 w-4' />
+          </Button>
+        ),
+        cell: ({ row }) => <div className='font-medium'>{getCustomerName(row.getValue('customerId'))}</div>,
       },
-    },
-    {
-      accessorKey: 'serialNumber',
-      header: ({ column }) => (
-        <Button variant='ghost' onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
-          Serial Number
-          <ArrowUpDown className='ml-2 h-4 w-4' />
-        </Button>
-      ),
-      cell: ({ row }) => <code className='text-sm'>{row.getValue('serialNumber')}</code>,
-    },
-    {
-      accessorKey: 'location',
-      header: 'Location',
-      cell: ({ row }) => {
-        const location = row.getValue('location') as string;
-        return location || <span className='text-slate-400'>-</span>;
+      {
+        accessorKey: 'type',
+        header: ({ column }) => (
+          <Button variant='ghost' onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
+            Type
+            <ArrowUpDown className='ml-2 h-4 w-4' />
+          </Button>
+        ),
+        cell: ({ row }) => {
+          const type = row.getValue('type') as string;
+          const colorMap: Record<string, string> = {
+            'iPilot Machine': 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+            'EGRO Machine': 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
+            'Crescendo Machine': 'bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-200',
+            'Rancilio Espresso Machine': 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200',
+            'Silvia Espresso Machine': 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200',
+            'BUNN Grinder': 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+            'BUNN Kyro Grinder': 'bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200',
+            'Samremo Grinder': 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200',
+            'Brewer Machine': 'bg-lime-100 text-lime-800 dark:bg-lime-900 dark:text-lime-200',
+            'Smartwave Brewer Machine': 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200',
+            'BUNN Server': 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
+            'Nitron RMV': 'bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-200',
+            'Water Machine': 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200',
+            'Barista Tools': 'bg-rose-100 text-rose-800 dark:bg-rose-900 dark:text-rose-200',
+            'BUNN Brewer Part': 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+            'BUNN Part': 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+            'iPilot Parts': 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+            'Rancilio Part': 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200',
+            'Flo Jet Pump': 'bg-pink-100 text-pink-800 dark:bg-pink-900 dark:text-pink-200',
+            'Misc. Part': 'bg-slate-100 text-slate-800 dark:bg-slate-900 dark:text-slate-200',
+            BUNN: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+            'Espresso Part': 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200',
+            'EGRO Part (Rancilio)': 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200',
+          };
+          return <Badge className={colorMap[type] ?? 'bg-slate-100 text-slate-800 dark:bg-slate-900 dark:text-slate-200'}>{type}</Badge>;
+        },
       },
-    },
-    {
-      id: 'actions',
-      header: 'Actions',
-      cell: ({ row }) => (
-        <div className='flex gap-2'>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant='ghost' size='sm' onClick={() => handleView(row.original)} className='h-8 w-8 p-0'>
-                <Eye className='h-4 w-4' />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>View machine</TooltipContent>
-          </Tooltip>
-          {user?.role !== 'call_admin' && user?.role !== 'store_manager' && (
-            <>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant='ghost' size='sm' onClick={() => handleEdit(row.original)} className='h-8 w-8 p-0'>
-                    <Edit2 className='h-4 w-4' />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Edit machine</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant='ghost' size='sm' onClick={() => setDeleteDialog(row.original)} className='h-8 w-8 p-0 text-destructive hover:text-destructive'>
-                    <Trash2 className='h-4 w-4' />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Delete machine</TooltipContent>
-              </Tooltip>
-            </>
-          )}
-        </div>
-      ),
-    },
-  ];
+      {
+        accessorKey: 'serialNumber',
+        header: ({ column }) => (
+          <Button variant='ghost' onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}>
+            Serial Number
+            <ArrowUpDown className='ml-2 h-4 w-4' />
+          </Button>
+        ),
+        cell: ({ row }) => <code className='text-sm'>{row.getValue('serialNumber')}</code>,
+      },
+      {
+        accessorKey: 'location',
+        header: 'Location',
+        cell: ({ row }) => {
+          const location = row.getValue('location') as string;
+          return location || <span className='text-slate-400'>-</span>;
+        },
+      },
+      {
+        id: 'actions',
+        header: 'Actions',
+        cell: ({ row }) => (
+          <div className='flex gap-2'>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant='ghost' size='sm' onClick={() => handleView(row.original)} className='h-8 w-8 p-0'>
+                  <Eye className='h-4 w-4' />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>View machine</TooltipContent>
+            </Tooltip>
+            {user?.role !== 'call_admin' && user?.role !== 'store_manager' && (
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant='ghost' size='sm' onClick={() => handleEdit(row.original)} className='h-8 w-8 p-0'>
+                      <Edit2 className='h-4 w-4' />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Edit machine</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant='ghost' size='sm' onClick={() => setDeleteDialog(row.original)} className='h-8 w-8 p-0 text-destructive hover:text-destructive'>
+                      <Trash2 className='h-4 w-4' />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Delete machine</TooltipContent>
+                </Tooltip>
+              </>
+            )}
+          </div>
+        ),
+      },
+    ],
+    [getCustomerName, handleView, handleEdit, user?.role],
+  );
 
   const table = useReactTable({
     data: machines,
@@ -538,47 +607,56 @@ export default function MachinesPage() {
 
         {/* Stats bar */}
         <div className='grid grid-cols-2 lg:grid-cols-4 gap-4 stagger-children'>
+          {/* Total machines */}
           <Card className='animate-card-enter border-t-4 border-t-primary/60 bg-linear-to-br from-primary/8 via-background to-background'>
             <CardContent className='pt-4 sm:pt-5 px-3 sm:px-6 flex items-center gap-3'>
               <div className='rounded-lg bg-primary/10 p-2.5'>
                 <Wrench className='h-4 w-4 text-primary' />
               </div>
-              <div>
+              <div className='min-w-0'>
                 <p className='text-2xl font-bold'>{machines.length}</p>
                 <p className='text-xs text-muted-foreground'>Total Machines</p>
               </div>
             </CardContent>
           </Card>
+
+          {/* Distinct types in use */}
           <Card className='animate-card-enter border-t-4 border-t-purple-500/60 bg-linear-to-br from-purple-500/8 via-background to-background'>
             <CardContent className='pt-4 sm:pt-5 px-3 sm:px-6 flex items-center gap-3'>
               <div className='rounded-lg bg-purple-500/10 p-2.5'>
-                <Wrench className='h-4 w-4 text-purple-600' />
+                <LayoutGrid className='h-4 w-4 text-purple-600' />
               </div>
-              <div>
-                <p className='text-2xl font-bold text-purple-700 dark:text-purple-400'>{typeCounts['Crescendo'] || 0}</p>
-                <p className='text-xs text-muted-foreground'>Crescendo</p>
+              <div className='min-w-0'>
+                <p className='text-2xl font-bold text-purple-700 dark:text-purple-400'>{uniqueTypeCount}</p>
+                <p className='text-xs text-muted-foreground'>Types In Use</p>
               </div>
             </CardContent>
           </Card>
+
+          {/* Most common type */}
           <Card className='animate-card-enter border-t-4 border-t-amber-500/60 bg-linear-to-br from-amber-500/8 via-background to-background'>
             <CardContent className='pt-4 sm:pt-5 px-3 sm:px-6 flex items-center gap-3'>
-              <div className='rounded-lg bg-amber-500/10 p-2.5'>
+              <div className='rounded-lg bg-amber-500/10 p-2.5 shrink-0'>
                 <Wrench className='h-4 w-4 text-amber-600' />
               </div>
-              <div>
-                <p className='text-2xl font-bold text-amber-700 dark:text-amber-400'>{typeCounts['Espresso'] || 0}</p>
-                <p className='text-xs text-muted-foreground'>Espresso</p>
+              <div className='min-w-0'>
+                <p className='text-2xl font-bold text-amber-700 dark:text-amber-400'>{topType ? topType[1] : 0}</p>
+                <p className='text-xs text-muted-foreground truncate' title={topType ? topType[0] : undefined}>
+                  {topType ? topType[0] : 'Top Type'}
+                </p>
               </div>
             </CardContent>
           </Card>
-          <Card className='animate-card-enter border-t-4 border-t-blue-500/60 bg-linear-to-br from-blue-500/8 via-background to-background'>
+
+          {/* Customers with machines */}
+          <Card className='animate-card-enter border-t-4 border-t-teal-500/60 bg-linear-to-br from-teal-500/8 via-background to-background'>
             <CardContent className='pt-4 sm:pt-5 px-3 sm:px-6 flex items-center gap-3'>
-              <div className='rounded-lg bg-blue-500/10 p-2.5'>
-                <Wrench className='h-4 w-4 text-blue-600' />
+              <div className='rounded-lg bg-teal-500/10 p-2.5'>
+                <Users className='h-4 w-4 text-teal-600' />
               </div>
-              <div>
-                <p className='text-2xl font-bold text-blue-700 dark:text-blue-400'>{typeCounts['Grinder'] || 0}</p>
-                <p className='text-xs text-muted-foreground'>Grinder</p>
+              <div className='min-w-0'>
+                <p className='text-2xl font-bold text-teal-700 dark:text-teal-400'>{uniqueCustomerCount}</p>
+                <p className='text-xs text-muted-foreground'>Customers Served</p>
               </div>
             </CardContent>
           </Card>
@@ -589,7 +667,7 @@ export default function MachinesPage() {
             <Input placeholder='Search machines...' value={globalFilter} onChange={(e) => setGlobalFilter(e.target.value)} className='max-w-sm' />
           </div>
 
-          <MachineFormDialog open={dialogOpen} onOpenChange={setDialogOpen} editingMachine={editingMachine} customers={customers} machineTypes={machineTypes} parts={parts} onSaved={loadData} />
+          <MachineFormDialog open={dialogOpen} onOpenChange={setDialogOpen} editingMachine={editingMachine} customers={customers} machineTypes={machineTypes} parts={parts} onSaved={reloadData} />
 
           <Card>
             <CardHeader className='flex flex-row items-center justify-between pb-3'>
@@ -753,6 +831,13 @@ export default function MachinesPage() {
           const errors: Record<string, string> = {};
           if (!String(row.serialNumber ?? '').trim()) errors.serialNumber = 'Serial number is required';
           if (!String(row.type ?? '').trim()) errors.type = 'Machine type is required';
+          const name = String(row.customerName ?? '').trim();
+          if (!name) {
+            errors.customerName = 'Customer name is required';
+          } else {
+            const match = customers.find((c) => c.companyName.toLowerCase() === name.toLowerCase());
+            if (!match) errors.customerName = `"${name}" does not match any customer — fix the name or add the customer first`;
+          }
           return errors;
         }}
         processChunk={async (rows) => {
@@ -760,7 +845,7 @@ export default function MachinesPage() {
           const allErrors = result.success ? result.errors : [...result.errors, result.error ?? 'Import failed'];
           return { created: result.created, skipped: result.skipped, errors: allErrors };
         }}
-        onComplete={() => loadData()}
+        onComplete={() => reloadData()}
       />
     </DashboardLayout>
   );

@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback } from 'react';
+import { clientCache } from '@/lib/client-cache';
 import { useDebounce } from '@/lib/hooks/useDebounce';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { useRouter } from 'next/navigation';
@@ -196,6 +197,18 @@ export default function PartsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
 
+  // ── Client-side cache ─────────────────────────────────────────────────────
+  // Runs before browser paint: if data is already cached, populate state
+  // immediately so the skeleton never appears on repeat visits.
+  useLayoutEffect(() => {
+    if (authLoading || !user?.storeId) return;
+    const cached = clientCache.get<{ parts: Part[]; machineTypes: string[] }>(`parts:${user.storeId}`);
+    if (!cached) return;
+    setParts(cached.parts);
+    setMachineTypes(cached.machineTypes);
+    setLoading(false);
+  }, [authLoading, user?.storeId]);
+
   // Stats
   const lowStockCount = parts.filter((p) => p.quantityInStock <= (p.minQuantity || 0)).length;
   const totalQty = parts.reduce((sum, p) => sum + (p.quantityInStock || 0), 0);
@@ -277,6 +290,29 @@ export default function PartsPage() {
 
   const canWrite = ['super_admin', 'store_admin', 'store_manager'].includes(user?.role ?? '');
 
+  const loadParts = useCallback(async () => {
+    if (!user?.storeId) return;
+    const storeId = user.storeId;
+    try {
+      const [data, types] = await Promise.all([getParts(), getMachineTypes()]);
+      const parts = data as unknown as Part[];
+      const machineTypes = types;
+      clientCache.set(`parts:${storeId}`, { parts, machineTypes });
+      setParts(parts);
+      setMachineTypes(machineTypes);
+    } catch (error) {
+      console.error('Error loading parts:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.storeId]);
+
+  /** Invalidate client cache then reload — call after any mutation. */
+  const reloadParts = useCallback(async () => {
+    if (user?.storeId) clientCache.invalidate(`parts:${user.storeId}`);
+    await loadParts();
+  }, [user?.storeId, loadParts]);
+
   useEffect(() => {
     if (authLoading) return;
     if (!user || !['super_admin', 'store_admin', 'store_manager', 'call_admin'].includes(user.role)) {
@@ -285,20 +321,7 @@ export default function PartsPage() {
     }
     if (!user.storeId) return;
     loadParts();
-  }, [user, authLoading]);
-
-  const loadParts = async () => {
-    if (!user?.storeId) return;
-    try {
-      const [data, types] = await Promise.all([getParts(), getMachineTypes()]);
-      setParts(data as unknown as Part[]);
-      setMachineTypes(types);
-    } catch (error) {
-      console.error('Error loading parts:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [user, authLoading, loadParts]);
 
   const handleEdit = (part: Part) => {
     setEditingPart(part);
@@ -316,7 +339,15 @@ export default function PartsPage() {
       const result = await deletePart(part.id);
       if (result.success) {
         showToast.success('Part deleted successfully');
-        setParts(parts.filter((p) => p.id !== part.id));
+        setParts((prev) => {
+          const next = prev.filter((p) => p.id !== part.id);
+          if (user?.storeId) {
+            const key = `parts:${user.storeId}`;
+            const cached = clientCache.get<{ parts: Part[]; machineTypes: string[] }>(key);
+            if (cached) clientCache.set(key, { ...cached, parts: next });
+          }
+          return next;
+        });
         setDeleteDialog(null);
       } else {
         showToast.error(result.error || 'Failed to delete part');
@@ -528,7 +559,7 @@ export default function PartsPage() {
             <Input placeholder='Search parts...' value={globalFilter} onChange={(e) => setGlobalFilter(e.target.value)} className='max-w-sm' />
           </div>
 
-          <PartFormDialog open={dialogOpen} onOpenChange={setDialogOpen} editingPart={editingPart} machineTypes={machineTypes} onSaved={loadParts} />
+          <PartFormDialog open={dialogOpen} onOpenChange={setDialogOpen} editingPart={editingPart} machineTypes={machineTypes} onSaved={reloadParts} />
 
           <Card>
             <CardHeader className='flex flex-row items-center justify-between pb-3'>
@@ -681,7 +712,7 @@ export default function PartsPage() {
         }}
         showUpdateToggle
         chunkSize={1000}
-        onComplete={() => loadParts()}
+        onComplete={() => reloadParts()}
       />
     </DashboardLayout>
   );

@@ -15,6 +15,7 @@ export interface ShareTicketData {
   machines: TicketMachine[];
   briefDescription?: string;
   issueDescription: string;
+  internalNotes?: string;
   contactPerson: string;
   assignedToName?: string | null;
   /** Accepts a plain Date or a Firestore Timestamp (has .toDate()) */
@@ -42,38 +43,56 @@ function formatVisitDate(v: Date | { toDate(): Date } | null | undefined): strin
 
 function buildMessage(data: ShareTicketData): string {
   const lines: string[] = [];
+  const div = '──────────────────────────';
 
-  lines.push(`🎫 *New Service Ticket — #${data.ticketNumber}*`);
+  lines.push('*CARIBBEAN ROASTERS — SERVICE DESK*');
+  lines.push(div);
+  lines.push(`*Ticket No:* #${data.ticketNumber}`);
   lines.push('');
 
+  // Client details
+  lines.push('*CLIENT DETAILS*');
   const customerName = data.machines[0]?.customerName;
-  if (customerName) lines.push(`👤 *Customer:* ${customerName}`);
-  lines.push(`📞 *Contact Person:* ${data.contactPerson}`);
+  if (customerName) lines.push(`Customer: ${customerName}`);
+  lines.push(`Contact Person: ${data.contactPerson}`);
   lines.push('');
 
+  // Equipment
   if (data.machines.length === 1) {
     const m = data.machines[0];
-    lines.push(`🔧 *Machine:* ${m.machineType} [S/N: ${m.serialNumber}]`);
-    lines.push(`⚡ *Priority:* ${m.priority}`);
+    lines.push('*EQUIPMENT*');
+    lines.push(`Machine: ${m.machineType}`);
+    lines.push(`Serial No: ${m.serialNumber}`);
+    lines.push(`Priority: ${m.priority}`);
   } else {
-    lines.push(`🔧 *Machines (${data.machines.length}):*`);
-    data.machines.forEach((m) => {
-      lines.push(`  • ${m.machineType} [S/N: ${m.serialNumber}] — ${m.priority}`);
+    lines.push(`*EQUIPMENT (${data.machines.length} Machines)*`);
+    data.machines.forEach((m, i) => {
+      lines.push(`${i + 1}. ${m.machineType} — S/N: ${m.serialNumber} (${m.priority})`);
     });
   }
   lines.push('');
 
-  lines.push(`📋 *Issue:*`);
-  lines.push(data.briefDescription || data.issueDescription);
+  // Fault description
+  lines.push('*FAULT DESCRIPTION*');
+  lines.push(data.issueDescription);
   lines.push('');
 
-  lines.push(`👨‍🔧 *Assigned Technician:* ${data.assignedToName || 'To be assigned'}`);
-
+  // Assignment
+  lines.push('*ASSIGNMENT*');
+  lines.push(`Technician: ${data.assignedToName || 'To be assigned'}`);
   const visitStr = formatVisitDate(data.scheduledVisitDate);
-  if (visitStr) lines.push(`📅 *Scheduled Visit:* ${visitStr}`);
+  if (visitStr) lines.push(`Scheduled Visit: ${visitStr}`);
+
+  // Internal notes
+  if (data.internalNotes?.trim()) {
+    lines.push('');
+    lines.push('*NOTES*');
+    lines.push(data.internalNotes.trim());
+  }
 
   lines.push('');
-  lines.push(`_Sent via Caribbean Roasters Service Desk_`);
+  lines.push(div);
+  lines.push('_Caribbean Roasters Field Service Management_');
 
   return lines.join('\n');
 }

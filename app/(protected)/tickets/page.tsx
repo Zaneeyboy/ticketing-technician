@@ -423,6 +423,15 @@ export default function TicketsPage() {
         },
       },
       {
+        accessorKey: 'createdByName',
+        header: 'Created By',
+        cell: ({ row }) => {
+          const name = row.getValue('createdByName') as string | undefined;
+          return name ? <span>{name}</span> : <span className='text-slate-400'>-</span>;
+        },
+        enableSorting: false,
+      },
+      {
         id: 'actions',
         header: 'Actions',
         cell: ({ row }) => {
