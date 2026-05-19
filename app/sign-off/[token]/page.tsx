@@ -130,17 +130,12 @@ function SignatureCanvas({ onChange }: { onChange: (dataUrl: string | null) => v
 
   return (
     <div className='space-y-2'>
-      <div
-        className='relative rounded-xl border-2 border-dashed border-border bg-background overflow-hidden'
-        style={{ touchAction: 'none' }}
-      >
-        <canvas ref={canvasRef} width={900} height={220} className='block w-full' style={{ height: '140px', cursor: 'crosshair' }} />
+      <div className='relative rounded-xl border-2 border-dashed border-border bg-white overflow-hidden' style={{ touchAction: 'none' }}>
+        <canvas ref={canvasRef} width={900} height={220} className='block w-full' style={{ height: '140px', cursor: 'crosshair', background: 'white' }} />
         <div className='absolute inset-0 flex items-end justify-center pb-3 pointer-events-none select-none'>
-          <div className='w-[85%] border-t border-border' />
+          <div className='w-[85%] border-t border-slate-300' />
         </div>
-        <p className='absolute top-3 left-0 right-0 text-center text-[11px] text-muted-foreground pointer-events-none select-none'>
-          Draw your signature above
-        </p>
+        <p className='absolute top-3 left-0 right-0 text-center text-[11px] text-slate-400 pointer-events-none select-none'>Draw your signature above</p>
       </div>
       <button type='button' onClick={clear} className='text-xs text-muted-foreground hover:text-foreground underline transition-colors'>
         Clear &amp; redraw
@@ -341,9 +336,7 @@ export default function SignOffPage() {
             {workLogs.map((log, i) => (
               <div key={log.machineId ?? i} className='space-y-1.5'>
                 <p className='text-xs font-semibold text-foreground flex items-center gap-2'>
-                  <span className='inline-flex items-center justify-center bg-primary/10 text-primary rounded-full h-5 w-5 text-[10px] font-bold shrink-0'>
-                    {i + 1}
-                  </span>
+                  <span className='inline-flex items-center justify-center bg-primary/10 text-primary rounded-full h-5 w-5 text-[10px] font-bold shrink-0'>{i + 1}</span>
                   {log.machineType}
                   <span className='font-normal text-muted-foreground'>[{log.machineSerialNumber}]</span>
                 </p>
@@ -389,9 +382,7 @@ export default function SignOffPage() {
               checked={confirmed}
               onChange={(e) => setConfirmed(e.target.checked)}
             />
-            <span className='text-sm text-foreground leading-snug'>
-              I confirm that the work described above has been completed to my satisfaction.
-            </span>
+            <span className='text-sm text-foreground leading-snug'>I confirm that the work described above has been completed to my satisfaction.</span>
           </label>
         </div>
 
@@ -434,11 +425,7 @@ export default function SignOffPage() {
         </div>
 
         {/* Error */}
-        {formError && (
-          <div className='rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive'>
-            {formError}
-          </div>
-        )}
+        {formError && <div className='rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive'>{formError}</div>}
 
         {/* Submit */}
         <button
@@ -456,9 +443,7 @@ export default function SignOffPage() {
           )}
         </button>
 
-        <p className='text-center text-xs text-muted-foreground'>
-          By signing above, you confirm that Caribbean Roasters technicians have completed the described service at your location.
-        </p>
+        <p className='text-center text-xs text-muted-foreground'>By signing above, you confirm that Caribbean Roasters technicians have completed the described service at your location.</p>
       </form>
     </Shell>
   );

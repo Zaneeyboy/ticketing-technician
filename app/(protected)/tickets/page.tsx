@@ -19,8 +19,8 @@ import { ViewTicketModal } from './view-ticket-modal';
 import { LogWorkModal } from './log-work-modal';
 import { SignOffLinkModal } from './sign-off-link-modal';
 import { ShareTicketDialog } from '@/components/share-ticket-dialog';
-import { getCustomersForTickets, getTechniciansForAssignment, CustomerForTicket, TechnicianForTicket } from '@/lib/actions/tickets';
-import { Plus, ArrowUpDown, ChevronsUpDown, ClipboardList, CheckCircle2, AlertTriangle, UserCheck as UserCheckIcon, Share2, Wrench, Pencil } from 'lucide-react';
+import { getCustomersForTickets, getTechniciansForAssignment, CustomerForTicket, TechnicianForTicket, closeTicket, adminForceCloseTicket } from '@/lib/actions/tickets';
+import { Plus, ArrowUpDown, ChevronsUpDown, ClipboardList, CheckCircle2, AlertTriangle, UserCheck as UserCheckIcon, Share2, Wrench, Pencil, XCircle } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/page-header';
@@ -28,6 +28,7 @@ import { DateRangeExportButton } from '@/components/export-button';
 import { type ExportColumn } from '@/lib/export';
 import { formatDate } from '@/lib/utils';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { showToast } from '@/lib/toast';
 import { TableSkeleton } from '@/components/skeletons/table-skeleton';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -210,6 +211,8 @@ export default function TicketsPage() {
         return 'bg-amber-500/15 text-amber-700 dark:text-amber-400';
       case 'Assigned':
         return 'bg-primary/10 text-primary dark:bg-primary/15';
+      case 'Signed Off':
+        return 'bg-violet-500/15 text-violet-700 dark:text-violet-400';
       case 'Closed':
         return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400';
       default:
@@ -250,6 +253,21 @@ export default function TicketsPage() {
   const handleShareTicket = (ticket: Ticket) => {
     setShareTicket(ticket);
     setShareDialogOpen(true);
+  };
+
+  const handleCloseSignedOffTicket = async (ticket: Ticket) => {
+    try {
+      const isAdmin = user?.role === 'store_admin' || user?.role === 'super_admin' || user?.role === 'store_manager';
+      const result = isAdmin ? await adminForceCloseTicket(ticket.id) : await closeTicket(ticket.id);
+      if (result.success) {
+        showToast.success('Ticket closed successfully');
+        loadTickets();
+      } else {
+        showToast.error(result.error || 'Failed to close ticket');
+      }
+    } catch {
+      showToast.error('Failed to close ticket');
+    }
   };
 
   // Filter tickets based on status and technician
@@ -444,7 +462,7 @@ export default function TicketsPage() {
 
           return (
             <div className='flex gap-2'>
-              {isAssignedTechnic && ticket.status !== 'Closed' && !(ticket as any).signOffLink && (
+              {isAssignedTechnic && ticket.status !== 'Closed' && ticket.status !== 'Signed Off' && !(ticket as any).signOffLink && (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button variant='ghost' size='sm' onClick={() => handleLogWork(ticket)} className='gap-1.5 text-blue-600 hover:text-blue-700'>
@@ -453,6 +471,17 @@ export default function TicketsPage() {
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>Log work performed on this ticket</TooltipContent>
+                </Tooltip>
+              )}
+              {ticket.status === 'Signed Off' && (isAssignedTechnic || user?.role === 'store_admin' || user?.role === 'super_admin' || user?.role === 'store_manager') && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant='ghost' size='sm' onClick={() => handleCloseSignedOffTicket(ticket)} className='gap-1.5 text-emerald-600 hover:text-emerald-700'>
+                      <XCircle className='h-4 w-4 shrink-0' />
+                      <span className='hidden sm:inline'>Close</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Close this signed-off ticket</TooltipContent>
                 </Tooltip>
               )}
               {(user?.role === 'store_admin' || user?.role === 'super_admin' || user?.role === 'call_admin' || user?.role === 'store_manager') && (
@@ -638,7 +667,7 @@ export default function TicketsPage() {
               <Input placeholder='Search by number, customer, machine, or issue...' value={globalFilter} onChange={(e) => setGlobalFilter(e.target.value)} className='sm:max-w-xs' />
             </div>
             <div className='flex flex-wrap items-center gap-2'>
-              {(['all', 'Open', 'Assigned', 'Closed'] as const).map((s) => {
+              {(['all', 'Open', 'Assigned', 'Signed Off', 'Closed'] as const).map((s) => {
                 const count = s === 'all' ? tickets.length : tickets.filter((t) => t.status === s).length;
                 return (
                   <button
@@ -759,12 +788,7 @@ export default function TicketsPage() {
           }}
         />
       )}
-      <SignOffLinkModal
-        isOpen={signOffModalOpen}
-        onClose={() => setSignOffModalOpen(false)}
-        url={signOffUrl ?? ''}
-        ticketNumber={signOffTicketNumber}
-      />
+      <SignOffLinkModal isOpen={signOffModalOpen} onClose={() => setSignOffModalOpen(false)} url={signOffUrl ?? ''} ticketNumber={signOffTicketNumber} />
       <ShareTicketDialog open={shareDialogOpen} onOpenChange={setShareDialogOpen} ticketData={shareTicket} />
     </DashboardLayout>
   );

@@ -1069,41 +1069,41 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess, onS
 
           {/* Submit Buttons */}
           <div className='flex flex-col-reverse sm:flex-row gap-3 pt-4'>
-              <Button type='submit' disabled={submitting || closingTicket || selectedMachineIds.size === 0} className='flex-1 sm:flex-1'>
-                {submitting ? (
-                  <>
-                    <Loader2 className='h-4 w-4 mr-2 animate-spin' />
-                    Saving...
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle className='h-4 w-4 mr-2' />
-                    Save Work Logs
-                  </>
-                )}
-              </Button>
-              <Button
-                type='button'
-                onClick={handleSubmit(handleSaveAndClose)}
-                disabled={submitting || closingTicket || selectedMachineIds.size === 0}
-                className='flex-1 bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-800'
-              >
-                {closingTicket ? (
-                  <>
-                    <Loader2 className='h-4 w-4 mr-2 animate-spin' />
-                    Generating link...
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle className='h-4 w-4 mr-2' />
-                    Complete &amp; Send for Sign-Off
-                  </>
-                )}
-              </Button>
-              <Button type='button' variant='outline' onClick={onClose} disabled={submitting || closingTicket} className='w-full sm:w-24'>
-                Cancel
-              </Button>
-            </div>
+            <Button type='submit' disabled={submitting || closingTicket || selectedMachineIds.size === 0} className='flex-1 sm:flex-1'>
+              {submitting ? (
+                <>
+                  <Loader2 className='h-4 w-4 mr-2 animate-spin' />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <CheckCircle className='h-4 w-4 mr-2' />
+                  Save Work Logs
+                </>
+              )}
+            </Button>
+            <Button
+              type='button'
+              onClick={handleSubmit(handleSaveAndClose)}
+              disabled={submitting || closingTicket || selectedMachineIds.size === 0}
+              className='flex-1 bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-800'
+            >
+              {closingTicket ? (
+                <>
+                  <Loader2 className='h-4 w-4 mr-2 animate-spin' />
+                  Generating link...
+                </>
+              ) : (
+                <>
+                  <CheckCircle className='h-4 w-4 mr-2' />
+                  Complete &amp; Send for Sign-Off
+                </>
+              )}
+            </Button>
+            <Button type='button' variant='outline' onClick={onClose} disabled={submitting || closingTicket} className='w-full sm:w-24'>
+              Cancel
+            </Button>
+          </div>
         </form>
       </DialogContent>
     </Dialog>

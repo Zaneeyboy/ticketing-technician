@@ -107,7 +107,7 @@ export const createPartSchema = z.object({
 export const updatePartSchema = createPartSchema.partial();
 
 // Ticket schemas
-export const ticketStatusSchema = z.enum(['Open', 'Assigned', 'In Progress', 'Pending Parts', 'Closed']);
+export const ticketStatusSchema = z.enum(['Open', 'Assigned', 'In Progress', 'Pending Parts', 'Signed Off', 'Closed']);
 export const ticketPrioritySchema = z.enum(['Low', 'Medium', 'High', 'Urgent']);
 
 export const partUsedSchema = z.object({

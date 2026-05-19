@@ -61,8 +61,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ tok
 
     const t = ticketSnap.data()!;
 
-    if (t.status === 'Closed') {
-      return NextResponse.json({ error: 'already_signed', message: 'This ticket has already been closed. No further action is needed.' }, { status: 410 });
+    if (t.status === 'Closed' || t.status === 'Signed Off') {
+      return NextResponse.json({ error: 'already_signed', message: 'This ticket has already been signed off. Thank you!' }, { status: 410 });
     }
 
     // Fetch work logs (public summary — no internal notes)
@@ -154,8 +154,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     const ticketRef = adminDb.collection('stores').doc(td.storeId).collection('tickets').doc(td.ticketId);
     const ticketSnap = await ticketRef.get();
     if (!ticketSnap.exists) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
-    if (ticketSnap.data()?.status === 'Closed') {
-      return NextResponse.json({ error: 'already_signed', message: 'This ticket is already closed.' }, { status: 410 });
+    if (['Closed', 'Signed Off'].includes(ticketSnap.data()?.status)) {
+      return NextResponse.json({ error: 'already_signed', message: 'This ticket has already been signed off.' }, { status: 410 });
     }
 
     const nowTs = Timestamp.fromDate(now);
@@ -164,8 +164,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     await adminDb.runTransaction(async (tx) => {
       tx.update(tokenRef, { used: true, usedAt: nowTs });
       tx.update(ticketRef, {
-        status: 'Closed',
-        closedAt: nowTs,
+        status: 'Signed Off',
+        signedOffAt: nowTs,
         updatedAt: nowTs,
         customerSignOff: {
           signedAt: nowTs,
@@ -175,11 +175,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
           comments: comments?.trim() || null,
         },
         statusHistory: FieldValue.arrayUnion({
-          status: 'Closed',
+          status: 'Signed Off',
           changedAt: nowTs,
           changedByUid: 'customer',
           changedByName: signedByName.trim(),
-          note: 'Closed via customer sign-off',
+          note: 'Signed off by customer',
         }),
       });
     });

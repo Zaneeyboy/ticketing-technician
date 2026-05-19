@@ -79,6 +79,8 @@ export function ViewTicketModal({ open, onOpenChange, ticket }: ViewTicketModalP
         return 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border-yellow-500/20';
       case 'Assigned':
         return 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20';
+      case 'Signed Off':
+        return 'bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/20';
       case 'Closed':
         return 'bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/20';
       default:

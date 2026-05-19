@@ -13,13 +13,11 @@ interface SignOffLinkModalProps {
 }
 
 export function SignOffLinkModal({ isOpen, onClose, url, ticketNumber }: SignOffLinkModalProps) {
-  const waMessage = encodeURIComponent(
-    `Please sign off on the service completed at your location.\n\nTicket: ${ticketNumber}\nLink (valid 3 days): ${url}`,
-  );
+  const waMessage = encodeURIComponent(`Please sign off on the service completed at your location.\n\nTicket: ${ticketNumber}\nLink (valid 3 days): ${url}`);
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className='sm:max-w-md'>
+      <DialogContent className='sm:max-w-md overflow-hidden'>
         <DialogHeader>
           <DialogTitle className='flex items-center gap-2 text-base'>
             <CheckCircle className='h-5 w-5 text-green-500 shrink-0' />
@@ -29,13 +27,12 @@ export function SignOffLinkModal({ isOpen, onClose, url, ticketNumber }: SignOff
 
         <div className='space-y-4 pt-1'>
           <p className='text-sm text-muted-foreground'>
-            Work logs saved. Share this link with the customer — it is valid for{' '}
-            <strong className='text-foreground'>3 days</strong>. The ticket closes automatically once they sign.
+            Work logs saved. Share this link with the customer — it is valid for <strong className='text-foreground'>3 days</strong>. The ticket closes automatically once they sign.
           </p>
 
           {/* URL row */}
-          <div className='flex items-center gap-2 rounded-lg border bg-muted px-3 py-2.5'>
-            <span className='flex-1 text-xs font-mono text-foreground truncate'>{url}</span>
+          <div className='flex items-center gap-2 rounded-lg border bg-muted px-3 py-2.5 overflow-hidden'>
+            <span className='flex-1 min-w-0 text-xs font-mono text-foreground truncate'>{url}</span>
             <Button
               size='sm'
               variant='ghost'
@@ -63,11 +60,7 @@ export function SignOffLinkModal({ isOpen, onClose, url, ticketNumber }: SignOff
               </svg>
               WhatsApp
             </a>
-            <Button
-              variant='outline'
-              className='flex-1 gap-2'
-              onClick={() => window.open(url, '_blank')}
-            >
+            <Button variant='outline' className='flex-1 gap-2' onClick={() => window.open(url, '_blank')}>
               <ExternalLink className='h-4 w-4' />
               Open Page
             </Button>

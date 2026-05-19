@@ -26,6 +26,7 @@ import { showToast } from '@/lib/toast';
 const STATUS_COLORS: Record<string, string> = {
   Open: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
   Assigned: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+  'Signed Off': 'bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-200',
   Closed: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
 };
 
@@ -113,8 +114,8 @@ export default function TicketDetailPage() {
   const isAdmin = user?.role && ['super_admin', 'store_admin', 'store_manager', 'call_admin'].includes(user.role);
   const isTechnician = user?.role === 'technician';
   const isAssignedTech = isTechnician && ticket?.assignedTo === user?.uid;
-  const canEdit = isAdmin && ticket?.status !== 'Closed';
-  const canLogWork = isAssignedTech && ticket?.status !== 'Closed';
+  const canEdit = isAdmin && ticket?.status !== 'Closed' && ticket?.status !== 'Signed Off';
+  const canLogWork = isAssignedTech && ticket?.status !== 'Closed' && ticket?.status !== 'Signed Off';
   const canClose = isAdmin && ticket?.status !== 'Closed';
 
   const handleCloseTicket = async () => {
