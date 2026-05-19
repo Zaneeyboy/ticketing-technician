@@ -6,6 +6,8 @@ import { CustomersTable } from './customers-table';
 import { PageHeader } from '@/components/page-header';
 import { Building2 } from 'lucide-react';
 
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   title: 'Customers',
   description: 'Manage customers',

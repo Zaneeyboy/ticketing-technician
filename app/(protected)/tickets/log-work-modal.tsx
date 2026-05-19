@@ -206,7 +206,7 @@ const machineWorkSchema = z.object({
   partsUsed: z.array(partUsedSchema).optional(),
   maintenanceRecommendation: z
     .object({
-      date: z.coerce.date().optional(),
+      date: z.date().optional(),
       notes: z.string().optional(),
     })
     .optional(),
@@ -407,8 +407,7 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
                 partsUsed: existingLog?.partsUsed || [],
                 maintenanceRecommendation: existingLog?.maintenanceRecommendation
                   ? {
-                      // type="date" inputs require a "YYYY-MM-DD" string, not a Date object
-                      date: existingLog.maintenanceRecommendation.date ? (format(existingLog.maintenanceRecommendation.date, 'yyyy-MM-dd') as any) : '',
+                      date: existingLog.maintenanceRecommendation.date || undefined,
                       notes: existingLog.maintenanceRecommendation.notes || '',
                     }
                   : undefined,
@@ -966,13 +965,18 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
                           <div className='space-y-3 p-3 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700'>
                             <Label>Maintenance Recommendation (Optional)</Label>
                             <div className='flex gap-2'>
-                              <Input
-                                type='date'
-                                placeholder='Recommended date'
-                                className='flex-1'
-                                {...register(`machineWorkLogs.${machineIdx}.maintenanceRecommendation.date`, {
-                                  setValueAs: (value) => (value === '' ? undefined : new Date(value)),
-                                })}
+                              <Controller
+                                name={`machineWorkLogs.${machineIdx}.maintenanceRecommendation.date`}
+                                control={control}
+                                render={({ field }) => (
+                                  <Input
+                                    type='date'
+                                    placeholder='Recommended date'
+                                    className='flex-1'
+                                    value={field.value instanceof Date ? format(field.value, 'yyyy-MM-dd') : ''}
+                                    onChange={(e) => field.onChange(e.target.value ? new Date(e.target.value) : undefined)}
+                                  />
+                                )}
                               />
                             </div>
                             <Textarea placeholder='Recommended maintenance or next steps...' className='min-h-16' {...register(`machineWorkLogs.${machineIdx}.maintenanceRecommendation.notes`)} />
