@@ -231,12 +231,12 @@ interface LogWorkModalProps {
   ticket: Ticket;
   machines: { machineId: string; machineType: string; serialNumber: string }[];
   onSuccess?: () => void;
+  onSignOffGenerated?: (url: string, ticketNumber: string) => void;
 }
 
-export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: LogWorkModalProps) {
+export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess, onSignOffGenerated }: LogWorkModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [closingTicket, setClosingTicket] = useState(false);
-  const [signOffUrl, setSignOffUrl] = useState<string | null>(null);
   const [availableParts, setAvailableParts] = useState<Part[]>([]);
   const [partsLoading, setPartsLoading] = useState(false);
   const [checkedItems, setCheckedItems] = useState<Set<number>>(new Set());
@@ -624,8 +624,12 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
 
         if (tokenResult.success && tokenResult.token) {
           const url = `${window.location.origin}/sign-off/${tokenResult.token}`;
-          setSignOffUrl(url);
           onSuccess?.(); // refresh parent list
+          onSignOffGenerated?.(url, ticket.ticketNumber);
+          reset();
+          setMachinePartsMap({});
+          setCheckedItems(new Set());
+          onClose();
         } else {
           showToast.error(tokenResult.error || 'Work saved but failed to generate sign-off link. Please regenerate from the ticket.');
         }
@@ -1063,69 +1067,8 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
             </CardContent>
           </Card>
 
-          {/* Sign-Off Link Panel — shown after work logs are saved */}
-          {signOffUrl && (
-            <div className='rounded-xl border border-green-200 bg-green-50 dark:bg-green-950/30 dark:border-green-800 p-4 space-y-3'>
-              <div className='flex items-center gap-2'>
-                <CheckCircle className='h-5 w-5 text-green-600 dark:text-green-400 shrink-0' />
-                <p className='text-sm font-semibold text-green-800 dark:text-green-300'>Work logs saved — sign-off link generated</p>
-              </div>
-              <p className='text-xs text-green-700 dark:text-green-400'>
-                Send the link below to the customer. It is valid for <strong>3 days</strong>. The ticket will close automatically once they sign.
-              </p>
-              <div className='flex items-center gap-2 rounded-lg border border-green-300 dark:border-green-700 bg-white dark:bg-green-950 px-3 py-2'>
-                <span className='flex-1 text-xs text-slate-700 dark:text-slate-300 truncate font-mono'>{signOffUrl}</span>
-                <button
-                  type='button'
-                  onClick={() => {
-                    navigator.clipboard.writeText(signOffUrl);
-                    showToast.success('Link copied!');
-                  }}
-                  className='shrink-0 text-xs font-medium text-green-700 dark:text-green-400 hover:underline'
-                >
-                  Copy
-                </button>
-              </div>
-              <div className='flex gap-2'>
-                <a
-                  href={`https://wa.me/?text=${encodeURIComponent(`Please sign off on the service completed at your location.\n\nTicket: ${ticket.ticketNumber}\nLink (valid 3 days): ${signOffUrl}`)}`}
-                  target='_blank'
-                  rel='noopener noreferrer'
-                  className='flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-[#25D366] hover:bg-[#1da851] text-white text-xs font-semibold py-2 transition-colors'
-                >
-                  <svg viewBox='0 0 24 24' className='h-4 w-4 fill-current'>
-                    <path d='M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z' />
-                  </svg>
-                  Share via WhatsApp
-                </a>
-                <button
-                  type='button'
-                  onClick={() => window.open(signOffUrl, '_blank')}
-                  className='flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-300 text-xs font-medium py-2 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors'
-                >
-                  Open Page
-                </button>
-              </div>
-              <Button
-                type='button'
-                onClick={() => {
-                  reset();
-                  setMachinePartsMap({});
-                  setCheckedItems(new Set());
-                  setSignOffUrl(null);
-                  onClose();
-                }}
-                className='w-full'
-                variant='outline'
-              >
-                Done — Close This Window
-              </Button>
-            </div>
-          )}
-
           {/* Submit Buttons */}
-          {!signOffUrl && (
-            <div className='flex flex-col-reverse sm:flex-row gap-3 pt-4'>
+          <div className='flex flex-col-reverse sm:flex-row gap-3 pt-4'>
               <Button type='submit' disabled={submitting || closingTicket || selectedMachineIds.size === 0} className='flex-1 sm:flex-1'>
                 {submitting ? (
                   <>
@@ -1161,7 +1104,6 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess }: L
                 Cancel
               </Button>
             </div>
-          )}
         </form>
       </DialogContent>
     </Dialog>

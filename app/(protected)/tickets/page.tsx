@@ -17,6 +17,7 @@ import { CreateTicketModal } from './create-ticket-modal';
 import { EditTicketModal } from './edit-ticket-modal';
 import { ViewTicketModal } from './view-ticket-modal';
 import { LogWorkModal } from './log-work-modal';
+import { SignOffLinkModal } from './sign-off-link-modal';
 import { ShareTicketDialog } from '@/components/share-ticket-dialog';
 import { getCustomersForTickets, getTechniciansForAssignment, CustomerForTicket, TechnicianForTicket } from '@/lib/actions/tickets';
 import { Plus, ArrowUpDown, ChevronsUpDown, ClipboardList, CheckCircle2, AlertTriangle, UserCheck as UserCheckIcon, Share2, Wrench, Pencil } from 'lucide-react';
@@ -68,6 +69,9 @@ export default function TicketsPage() {
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [shareTicket, setShareTicket] = useState<Ticket | null>(null);
+  const [signOffModalOpen, setSignOffModalOpen] = useState(false);
+  const [signOffUrl, setSignOffUrl] = useState<string | null>(null);
+  const [signOffTicketNumber, setSignOffTicketNumber] = useState('');
 
   useEffect(() => {
     if (user?.uid) {
@@ -440,7 +444,7 @@ export default function TicketsPage() {
 
           return (
             <div className='flex gap-2'>
-              {isAssignedTechnic && ticket.status !== 'Closed' && (
+              {isAssignedTechnic && ticket.status !== 'Closed' && !(ticket as any).signOffLink && (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button variant='ghost' size='sm' onClick={() => handleLogWork(ticket)} className='gap-1.5 text-blue-600 hover:text-blue-700'>
@@ -747,8 +751,20 @@ export default function TicketsPage() {
             loadTickets();
             setLogWorkModalOpen(false);
           }}
+          onSignOffGenerated={(url, ticketNumber) => {
+            setSignOffUrl(url);
+            setSignOffTicketNumber(ticketNumber);
+            setSignOffModalOpen(true);
+            loadTickets(); // refresh ticket list so Log Work button hides
+          }}
         />
       )}
+      <SignOffLinkModal
+        isOpen={signOffModalOpen}
+        onClose={() => setSignOffModalOpen(false)}
+        url={signOffUrl ?? ''}
+        ticketNumber={signOffTicketNumber}
+      />
       <ShareTicketDialog open={shareDialogOpen} onOpenChange={setShareDialogOpen} ticketData={shareTicket} />
     </DashboardLayout>
   );

@@ -130,14 +130,19 @@ function SignatureCanvas({ onChange }: { onChange: (dataUrl: string | null) => v
 
   return (
     <div className='space-y-2'>
-      <div className='relative rounded-xl border-2 border-dashed border-slate-300 bg-white overflow-hidden' style={{ touchAction: 'none' }}>
+      <div
+        className='relative rounded-xl border-2 border-dashed border-border bg-background overflow-hidden'
+        style={{ touchAction: 'none' }}
+      >
         <canvas ref={canvasRef} width={900} height={220} className='block w-full' style={{ height: '140px', cursor: 'crosshair' }} />
         <div className='absolute inset-0 flex items-end justify-center pb-3 pointer-events-none select-none'>
-          <div className='w-[85%] border-t border-slate-300' />
+          <div className='w-[85%] border-t border-border' />
         </div>
-        <p className='absolute top-3 left-0 right-0 text-center text-[11px] text-slate-300 pointer-events-none select-none'>Draw your signature above</p>
+        <p className='absolute top-3 left-0 right-0 text-center text-[11px] text-muted-foreground pointer-events-none select-none'>
+          Draw your signature above
+        </p>
       </div>
-      <button type='button' onClick={clear} className='text-xs text-slate-400 hover:text-slate-600 underline transition-colors'>
+      <button type='button' onClick={clear} className='text-xs text-muted-foreground hover:text-foreground underline transition-colors'>
         Clear &amp; redraw
       </button>
     </div>
@@ -232,8 +237,8 @@ export default function SignOffPage() {
     return (
       <Shell>
         <div className='flex flex-col items-center gap-4 py-16'>
-          <div className='h-10 w-10 rounded-full border-4 border-blue-500 border-t-transparent animate-spin' />
-          <p className='text-slate-500 text-sm'>Loading service report…</p>
+          <div className='h-10 w-10 rounded-full border-4 border-primary border-t-transparent animate-spin' />
+          <p className='text-muted-foreground text-sm'>Loading service report…</p>
         </div>
       </Shell>
     );
@@ -275,13 +280,17 @@ export default function SignOffPage() {
   if (state === 'success') {
     return (
       <Shell>
-        <div className='text-center space-y-4 py-8'>
-          <div className='text-5xl'>✅</div>
-          <h2 className='text-xl font-semibold text-slate-800'>Sign-Off Complete</h2>
-          <p className='text-slate-600 text-sm max-w-xs mx-auto'>
-            Thank you, <strong>{name}</strong>. Your sign-off has been recorded and the service ticket is now closed.
+        <div className='rounded-2xl border border-border bg-card shadow-sm p-8 text-center space-y-4'>
+          <div className='mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-100'>
+            <svg className='h-8 w-8 text-green-600' fill='none' viewBox='0 0 24 24' stroke='currentColor' strokeWidth={2.5}>
+              <path strokeLinecap='round' strokeLinejoin='round' d='M5 13l4 4L19 7' />
+            </svg>
+          </div>
+          <h2 className='text-xl font-semibold text-foreground'>Sign-Off Complete</h2>
+          <p className='text-muted-foreground text-sm max-w-xs mx-auto'>
+            Thank you, <strong className='text-foreground'>{name}</strong>. Your sign-off has been recorded and the service ticket is now closed.
           </p>
-          <p className='text-slate-400 text-xs'>You may now close this page.</p>
+          <p className='text-muted-foreground text-xs'>You may now close this page.</p>
         </div>
       </Shell>
     );
@@ -294,16 +303,16 @@ export default function SignOffPage() {
 
   return (
     <Shell>
-      {/* Header */}
-      <div className='text-center space-y-1 pb-4 border-b border-slate-100'>
-        <p className='text-xs font-semibold tracking-widest text-blue-600 uppercase'>Caribbean Roasters</p>
-        <h1 className='text-lg font-bold text-slate-800'>Service Completion Report</h1>
-        <p className='text-sm text-slate-500'>Ticket {ticket.ticketNumber}</p>
+      {/* Brand header */}
+      <div className='text-center space-y-1.5 pb-5 border-b border-border'>
+        <p className='text-xs font-bold tracking-widest text-primary uppercase'>Caribbean Roasters</p>
+        <h1 className='text-xl font-bold text-foreground'>Service Completion Report</h1>
+        <p className='text-sm text-muted-foreground'>Ticket {ticket.ticketNumber}</p>
       </div>
 
       {/* Expiry warning */}
       {hoursRemaining < 24 && (
-        <div className='rounded-lg bg-amber-50 border border-amber-200 px-4 py-2 text-xs text-amber-700 flex items-center gap-2'>
+        <div className='rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800 flex items-center gap-2'>
           <span>⏰</span>
           <span>
             This sign-off link expires in{' '}
@@ -326,37 +335,39 @@ export default function SignOffPage() {
       {/* Work Summary */}
       <InfoCard title='Work Performed'>
         {workLogs.length === 0 ? (
-          <p className='text-sm text-slate-400 italic'>No work log entries recorded.</p>
+          <p className='text-sm text-muted-foreground italic'>No work log entries recorded.</p>
         ) : (
           <div className='space-y-4'>
             {workLogs.map((log, i) => (
               <div key={log.machineId ?? i} className='space-y-1.5'>
-                <p className='text-xs font-semibold text-slate-700 flex items-center gap-2'>
-                  <span className='inline-flex items-center justify-center bg-blue-100 text-blue-700 rounded-full h-5 w-5 text-[10px] font-bold shrink-0'>{i + 1}</span>
+                <p className='text-xs font-semibold text-foreground flex items-center gap-2'>
+                  <span className='inline-flex items-center justify-center bg-primary/10 text-primary rounded-full h-5 w-5 text-[10px] font-bold shrink-0'>
+                    {i + 1}
+                  </span>
                   {log.machineType}
-                  <span className='font-normal text-slate-400'>[{log.machineSerialNumber}]</span>
+                  <span className='font-normal text-muted-foreground'>[{log.machineSerialNumber}]</span>
                 </p>
                 {log.workPerformed && (
-                  <p className='text-xs text-slate-600 pl-7'>
-                    <span className='font-medium text-slate-700'>Work: </span>
+                  <p className='text-xs text-muted-foreground pl-7'>
+                    <span className='font-medium text-foreground'>Work: </span>
                     {log.workPerformed}
                   </p>
                 )}
                 {log.outcome && (
-                  <p className='text-xs text-slate-600 pl-7'>
-                    <span className='font-medium text-slate-700'>Outcome: </span>
+                  <p className='text-xs text-muted-foreground pl-7'>
+                    <span className='font-medium text-foreground'>Outcome: </span>
                     {log.outcome}
                   </p>
                 )}
                 {log.repairs && (
-                  <p className='text-xs text-slate-600 pl-7'>
-                    <span className='font-medium text-slate-700'>Repairs: </span>
+                  <p className='text-xs text-muted-foreground pl-7'>
+                    <span className='font-medium text-foreground'>Repairs: </span>
                     {log.repairs}
                   </p>
                 )}
                 {log.partsUsed && log.partsUsed.length > 0 && (
-                  <p className='text-xs text-slate-600 pl-7'>
-                    <span className='font-medium text-slate-700'>Parts used: </span>
+                  <p className='text-xs text-muted-foreground pl-7'>
+                    <span className='font-medium text-foreground'>Parts used: </span>
                     {log.partsUsed.map((p) => `${p.partName} ×${p.quantity}`).join(', ')}
                   </p>
                 )}
@@ -369,47 +380,47 @@ export default function SignOffPage() {
       {/* Sign-Off Form */}
       <form onSubmit={handleSubmit} className='space-y-5'>
         {/* Satisfaction Checkbox */}
-        <label className='flex items-start gap-3 cursor-pointer group'>
-          <div
-            className={`mt-0.5 shrink-0 h-5 w-5 rounded border-2 flex items-center justify-center transition-colors ${confirmed ? 'bg-blue-600 border-blue-600' : 'border-slate-300 group-hover:border-blue-400'}`}
-            onClick={() => setConfirmed((c) => !c)}
-          >
-            {confirmed && (
-              <svg className='h-3 w-3 text-white' viewBox='0 0 12 10' fill='none'>
-                <path d='M1 5l3.5 3.5L11 1' stroke='currentColor' strokeWidth='2.5' strokeLinecap='round' strokeLinejoin='round' />
-              </svg>
-            )}
-          </div>
-          <input type='checkbox' className='sr-only' checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
-          <span className='text-sm text-slate-700 leading-snug'>I confirm that the work described above has been completed to my satisfaction.</span>
-        </label>
+        <div className='rounded-xl border border-border bg-card p-4'>
+          <label className='flex items-start gap-3 cursor-pointer'>
+            <input
+              type='checkbox'
+              id='satisfaction-confirmed'
+              className='mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-border accent-primary'
+              checked={confirmed}
+              onChange={(e) => setConfirmed(e.target.checked)}
+            />
+            <span className='text-sm text-foreground leading-snug'>
+              I confirm that the work described above has been completed to my satisfaction.
+            </span>
+          </label>
+        </div>
 
         {/* Comments */}
         <div className='space-y-1.5'>
-          <label className='block text-xs font-semibold text-slate-600 uppercase tracking-wide'>
-            Comments <span className='font-normal text-slate-400 normal-case'>(optional)</span>
+          <label className='block text-xs font-semibold text-muted-foreground uppercase tracking-wide'>
+            Comments <span className='font-normal text-muted-foreground normal-case'>(optional)</span>
           </label>
           <textarea
             value={comments}
             onChange={(e) => setComments(e.target.value)}
             rows={3}
             placeholder='Any additional comments or feedback…'
-            className='w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none'
+            className='w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none'
           />
         </div>
 
         {/* Signature Canvas */}
         <div className='space-y-1.5'>
-          <label className='block text-xs font-semibold text-slate-600 uppercase tracking-wide'>
-            Signature <span className='text-red-500'>*</span>
+          <label className='block text-xs font-semibold text-muted-foreground uppercase tracking-wide'>
+            Signature <span className='text-destructive'>*</span>
           </label>
           <SignatureCanvas onChange={setSignature} />
         </div>
 
         {/* Printed Name */}
         <div className='space-y-1.5'>
-          <label htmlFor='signedByName' className='block text-xs font-semibold text-slate-600 uppercase tracking-wide'>
-            Full Name (printed) <span className='text-red-500'>*</span>
+          <label htmlFor='signedByName' className='block text-xs font-semibold text-muted-foreground uppercase tracking-wide'>
+            Full Name (printed) <span className='text-destructive'>*</span>
           </label>
           <input
             id='signedByName'
@@ -418,22 +429,26 @@ export default function SignOffPage() {
             onChange={(e) => setName(e.target.value)}
             placeholder='e.g. JOHN SMITH'
             autoCapitalize='characters'
-            className='w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent font-medium tracking-wide'
+            className='w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring font-medium tracking-wide'
           />
         </div>
 
         {/* Error */}
-        {formError && <div className='rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700'>{formError}</div>}
+        {formError && (
+          <div className='rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive'>
+            {formError}
+          </div>
+        )}
 
         {/* Submit */}
         <button
           type='submit'
           disabled={isSubmitting}
-          className='w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold text-sm transition-colors flex items-center justify-center gap-2'
+          className='w-full py-3.5 rounded-xl bg-primary hover:bg-primary/90 disabled:opacity-60 text-primary-foreground font-semibold text-sm transition-colors flex items-center justify-center gap-2'
         >
           {isSubmitting ? (
             <>
-              <span className='h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin' />
+              <span className='h-4 w-4 rounded-full border-2 border-primary-foreground border-t-transparent animate-spin' />
               Submitting…
             </>
           ) : (
@@ -441,7 +456,9 @@ export default function SignOffPage() {
           )}
         </button>
 
-        <p className='text-center text-xs text-slate-400'>By signing above, you confirm that Caribbean Roasters technicians have completed the described service at your location.</p>
+        <p className='text-center text-xs text-muted-foreground'>
+          By signing above, you confirm that Caribbean Roasters technicians have completed the described service at your location.
+        </p>
       </form>
     </Shell>
   );
@@ -451,7 +468,7 @@ export default function SignOffPage() {
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className='min-h-screen bg-slate-50'>
+    <div className='min-h-screen bg-background'>
       <div className='max-w-lg mx-auto px-4 py-8 space-y-6'>{children}</div>
     </div>
   );
@@ -459,9 +476,9 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 function InfoCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className='rounded-xl border border-slate-100 bg-white shadow-sm overflow-hidden'>
-      <div className='bg-slate-50 border-b border-slate-100 px-4 py-2.5'>
-        <h3 className='text-xs font-semibold text-slate-600 uppercase tracking-wide'>{title}</h3>
+    <div className='rounded-xl border border-border bg-card shadow-sm overflow-hidden'>
+      <div className='bg-muted border-b border-border px-4 py-2.5'>
+        <h3 className='text-xs font-semibold text-muted-foreground uppercase tracking-wide'>{title}</h3>
       </div>
       <div className='px-4 py-4'>{children}</div>
     </div>
@@ -470,9 +487,9 @@ function InfoCard({ title, children }: { title: string; children: React.ReactNod
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className='flex justify-between text-sm py-1 border-b border-slate-50 last:border-0'>
-      <span className='text-slate-500 shrink-0 mr-3'>{label}</span>
-      <span className='text-slate-800 font-medium text-right'>{value}</span>
+    <div className='flex justify-between text-sm py-1.5 border-b border-border last:border-0'>
+      <span className='text-muted-foreground shrink-0 mr-3'>{label}</span>
+      <span className='text-foreground font-medium text-right'>{value}</span>
     </div>
   );
 }
@@ -484,7 +501,7 @@ function StatusCard({ icon, title, message, color }: { icon: string; title: stri
     red: 'bg-red-50 border-red-200 text-red-800',
   };
   return (
-    <div className={`rounded-xl border px-6 py-8 text-center space-y-3 ${colors[color]}`}>
+    <div className={`rounded-2xl border px-6 py-10 text-center space-y-3 ${colors[color]}`}>
       <div className='text-4xl'>{icon}</div>
       <h2 className='text-lg font-semibold'>{title}</h2>
       <p className='text-sm leading-relaxed opacity-90'>{message}</p>
