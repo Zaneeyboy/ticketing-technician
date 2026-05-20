@@ -509,6 +509,10 @@ export default function MachinesPage() {
               <TooltipContent>View machine</TooltipContent>
             </Tooltip>
             {user?.role !== 'store_manager' && (
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant='ghost' size='sm' onClick={() => handleEdit(row.original)} className='h-8 w-8 p-0'>
                       <Edit2 className='h-4 w-4' />
                     </Button>
                   </TooltipTrigger>
@@ -575,6 +579,8 @@ export default function MachinesPage() {
                 title='Machines Inventory'
               />
               {user?.role !== 'store_manager' && (
+                <>
+                  <Button variant='outline' size='sm' onClick={downloadTemplate} className='gap-2'>
                     <Download className='h-4 w-4' />
                     Template
                   </Button>
