@@ -91,7 +91,7 @@ function CreateUserDialog({ onSuccess }: { onSuccess: () => Promise<void> }) {
       <DialogTrigger asChild>
         <Button>Create User</Button>
       </DialogTrigger>
-      <DialogContent className='max-w-lg'>
+      <DialogContent className='max-w-lg' aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>Create User</DialogTitle>
         </DialogHeader>
@@ -168,7 +168,7 @@ function InviteUserDialog({ onSuccess }: { onSuccess: (joinUrl: string, name: st
           Invite User
         </Button>
       </DialogTrigger>
-      <DialogContent className='max-w-md'>
+      <DialogContent className='max-w-md' aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>Invite User</DialogTitle>
         </DialogHeader>
@@ -781,7 +781,7 @@ export default function UsersClient() {
       </div>
 
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className='max-w-lg'>
+        <DialogContent className='max-w-lg' aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>Edit User</DialogTitle>
           </DialogHeader>
@@ -848,7 +848,7 @@ export default function UsersClient() {
       </Dialog>
 
       <Dialog open={passwordDialogOpen} onOpenChange={setPasswordDialogOpen}>
-        <DialogContent className='max-w-lg'>
+        <DialogContent className='max-w-lg' aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>Change Password</DialogTitle>
           </DialogHeader>
@@ -874,7 +874,7 @@ export default function UsersClient() {
       </Dialog>
 
       <Dialog open={confirmDialog.open} onOpenChange={(open) => setConfirmDialog({ ...confirmDialog, open })}>
-        <DialogContent className='max-w-md'>
+        <DialogContent className='max-w-md' aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>{confirmTitle}</DialogTitle>
           </DialogHeader>
@@ -900,7 +900,7 @@ export default function UsersClient() {
 
       {/* ── Join Link Dialog ─────────────────────────────────────────────── */}
       <Dialog open={joinLinkDialog.open} onOpenChange={(open) => setJoinLinkDialog((p) => ({ ...p, open }))}>
-        <DialogContent className='max-w-md'>
+        <DialogContent className='max-w-md' aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>Invitation link ready</DialogTitle>
           </DialogHeader>

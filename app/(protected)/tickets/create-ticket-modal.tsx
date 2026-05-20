@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -9,8 +9,23 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { showToast } from '@/lib/toast';
-import { createTicket, getCustomersForTickets, getMachinesForCustomer, getTechniciansForAssignment, CustomerForTicket, MachineForTicket, TechnicianForTicket } from '@/lib/actions/tickets';
-import { Upload, X, Search, Plus, Trash2, Building2, Cpu, FileText, UserCheck, ImageOff, ClipboardList } from 'lucide-react';
+import {
+  createTicket,
+  getCustomersForTickets,
+  getMachinesForCustomer,
+  getTechniciansForAssignment,
+  getTechnicianWeekSchedule,
+  getTechAvailabilityForDate,
+  getMaintenanceRemindersForCustomer,
+  CustomerForTicket,
+  MachineForTicket,
+  TechnicianForTicket,
+  TechScheduleEntry,
+  TechDayLoad,
+  CustomerMaintenanceReminder,
+} from '@/lib/actions/tickets';
+import { Upload, X, Search, Plus, Trash2, Building2, Cpu, FileText, UserCheck, ImageOff, ClipboardList, CalendarSearch, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { TicketMachine, MACHINE_TYPES } from '@/lib/types';
 import { useDebounce } from '@/lib/hooks/useDebounce';
 import { ShareTicketDialog, ShareTicketData } from '@/components/share-ticket-dialog';
@@ -85,6 +100,29 @@ export function CreateTicketModal({ open, onOpenChange, onSuccess, preloadedCust
   const [shareOpen, setShareOpen] = useState(false);
   const [pendingShareData, setPendingShareData] = useState<ShareTicketData | null>(null);
 
+  // Technician availability panel
+  const [techSchedule, setTechSchedule] = useState<TechScheduleEntry[]>([]);
+  const [techScheduleLoading, setTechScheduleLoading] = useState(false);
+  const [showTechSchedule, setShowTechSchedule] = useState(false);
+  // Cache per-technician schedule for the life of the modal session
+  const techScheduleCacheRef = useRef<Map<string, TechScheduleEntry[]>>(new Map());
+
+  // Date-level availability: techId → count of active tickets on the selected date
+  const [dateAvailability, setDateAvailability] = useState<Map<string, number>>(new Map());
+  const [dateAvailabilityLoading, setDateAvailabilityLoading] = useState(false);
+
+  // Maintenance reminders for the selected customer's machines (keyed by machineId)
+  const [customerReminders, setCustomerReminders] = useState<Map<string, CustomerMaintenanceReminder>>(new Map());
+
+  // Clear schedule cache when modal closes
+  useEffect(() => {
+    if (!open) {
+      techScheduleCacheRef.current.clear();
+      setCustomerReminders(new Map());
+      setDateAvailability(new Map());
+    }
+  }, [open]);
+
   // Reset form when modal opens
   useEffect(() => {
     if (open) {
@@ -139,13 +177,19 @@ export function CreateTicketModal({ open, onOpenChange, onSuccess, preloadedCust
     }
   };
 
-  // Load machines when customer changes
+  // Load machines and pending maintenance reminders when customer changes
   useEffect(() => {
     const loadMachines = async () => {
       if (formData.selectedCustomerId) {
         try {
-          const machinesData = await getMachinesForCustomer(formData.selectedCustomerId);
+          const [machinesData, remindersResult] = await Promise.all([getMachinesForCustomer(formData.selectedCustomerId), getMaintenanceRemindersForCustomer(formData.selectedCustomerId)]);
           setCustomerMachines(machinesData);
+          // Build machineId → reminder map for O(1) lookup in the UI
+          const reminderMap = new Map<string, CustomerMaintenanceReminder>();
+          for (const r of remindersResult.reminders ?? []) {
+            reminderMap.set(r.machineId, r);
+          }
+          setCustomerReminders(reminderMap);
           // Reset machine form
           setMachineForm({
             machineId: '',
@@ -161,6 +205,32 @@ export function CreateTicketModal({ open, onOpenChange, onSuccess, preloadedCust
     };
     loadMachines();
   }, [formData.selectedCustomerId]);
+
+  // Auto-load tech availability whenever the scheduled date changes
+  useEffect(() => {
+    const loadAvailability = async () => {
+      if (!formData.scheduledVisitDate) {
+        setDateAvailability(new Map());
+        return;
+      }
+      setDateAvailabilityLoading(true);
+      try {
+        const result = await getTechAvailabilityForDate(formData.scheduledVisitDate);
+        if (result.success) {
+          const map = new Map<string, number>();
+          for (const load of result.loads ?? []) {
+            map.set(load.techId, load.scheduledCount);
+          }
+          setDateAvailability(map);
+        }
+      } catch {
+        // silently ignore — availability badges are informational only
+      } finally {
+        setDateAvailabilityLoading(false);
+      }
+    };
+    loadAvailability();
+  }, [formData.scheduledVisitDate]);
 
   // Filter customers based on search
   useEffect(() => {
@@ -256,6 +326,37 @@ export function CreateTicketModal({ open, onOpenChange, onSuccess, preloadedCust
     }));
     setTechnicianSearch('');
     setShowTechnicianDropdown(false);
+    // Reset availability panel when technician changes
+    setTechSchedule([]);
+    setShowTechSchedule(false);
+  };
+
+  const handleCheckAvailability = async () => {
+    if (!formData.assignedTo) return;
+    setShowTechSchedule((prev) => !prev);
+    if (showTechSchedule) return; // toggling off — nothing to fetch
+
+    // Serve from in-session cache if already fetched for this technician
+    if (techScheduleCacheRef.current.has(formData.assignedTo)) {
+      setTechSchedule(techScheduleCacheRef.current.get(formData.assignedTo)!);
+      return;
+    }
+
+    setTechScheduleLoading(true);
+    try {
+      const result = await getTechnicianWeekSchedule(formData.assignedTo, 7);
+      if (result.success) {
+        const entries = result.entries ?? [];
+        techScheduleCacheRef.current.set(formData.assignedTo, entries);
+        setTechSchedule(entries);
+      } else {
+        showToast.error('Could not load schedule');
+      }
+    } catch {
+      showToast.error('Failed to load schedule');
+    } finally {
+      setTechScheduleLoading(false);
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -576,6 +677,24 @@ export function CreateTicketModal({ open, onOpenChange, onSuccess, preloadedCust
                           </div>
                         </div>
 
+                        {/* Maintenance reminder hint */}
+                        {customerReminders.has(machineForm.machineId) &&
+                          (() => {
+                            const rem = customerReminders.get(machineForm.machineId)!;
+                            return (
+                              <div className='flex items-start gap-2.5 bg-violet-50 dark:bg-violet-950/30 border border-violet-200 dark:border-violet-800 rounded-lg px-3 py-2.5'>
+                                <AlertTriangle className='h-4 w-4 text-violet-600 dark:text-violet-400 shrink-0 mt-0.5' />
+                                <div className='min-w-0'>
+                                  <p className='text-xs font-semibold text-violet-700 dark:text-violet-300'>Service recommended</p>
+                                  <p className='text-xs text-violet-600 dark:text-violet-400 mt-0.5'>
+                                    Due {rem.recommendedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                    {rem.notes ? ` — ${rem.notes}` : ''}
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          })()}
+
                         <div className='space-y-1.5'>
                           <Label htmlFor='priority' className='text-xs font-medium'>
                             Priority
@@ -620,6 +739,11 @@ export function CreateTicketModal({ open, onOpenChange, onSuccess, preloadedCust
                             <div className='flex items-center gap-2 flex-wrap mb-2'>
                               <span className='text-sm font-medium text-foreground'>{machine.serialNumber}</span>
                               <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${PRIORITY_BADGE[machine.priority] ?? 'bg-muted text-muted-foreground'}`}>{machine.priority}</span>
+                              {customerReminders.has(machine.machineId) && (
+                                <span className='inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300'>
+                                  Service due {customerReminders.get(machine.machineId)!.recommendedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                </span>
+                              )}
                             </div>
                             <div className='flex gap-3 flex-wrap'>
                               <div className='space-y-0.5'>
@@ -746,16 +870,37 @@ export function CreateTicketModal({ open, onOpenChange, onSuccess, preloadedCust
                     {showTechnicianDropdown && (filteredTechnicians.length > 0 || technicianSearch) && (
                       <div className='absolute top-full left-0 right-0 mt-1 z-50 bg-popover border border-border rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto'>
                         {filteredTechnicians.length > 0 ? (
-                          filteredTechnicians.map((tech) => (
-                            <button
-                              key={tech.id}
-                              type='button'
-                              onClick={() => handleTechnicianSelect(tech.id, tech.name)}
-                              className='w-full text-left px-4 py-2.5 hover:bg-accent text-sm font-medium text-foreground transition-colors border-b border-border last:border-b-0 cursor-pointer'
-                            >
-                              {tech.name}
-                            </button>
-                          ))
+                          filteredTechnicians.map((tech) => {
+                            const visitCount = dateAvailability.get(tech.id) ?? 0;
+                            const hasDate = !!formData.scheduledVisitDate;
+                            return (
+                              <button
+                                key={tech.id}
+                                type='button'
+                                onClick={() => handleTechnicianSelect(tech.id, tech.name)}
+                                className='w-full text-left px-4 py-2.5 hover:bg-accent text-sm font-medium text-foreground transition-colors border-b border-border last:border-b-0 cursor-pointer'
+                              >
+                                <span className='flex items-center justify-between gap-2'>
+                                  <span>{tech.name}</span>
+                                  {hasDate && (
+                                    <span
+                                      className={`shrink-0 text-[11px] font-semibold px-1.5 py-0.5 rounded-full ${
+                                        dateAvailabilityLoading
+                                          ? 'text-muted-foreground'
+                                          : visitCount === 0
+                                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400'
+                                            : visitCount <= 2
+                                              ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400'
+                                              : 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400'
+                                      }`}
+                                    >
+                                      {dateAvailabilityLoading ? '⋯' : visitCount === 0 ? 'Free' : `${visitCount} visit${visitCount > 1 ? 's' : ''}`}
+                                    </span>
+                                  )}
+                                </span>
+                              </button>
+                            );
+                          })
                         ) : (
                           <div className='px-4 py-3 text-sm text-muted-foreground'>No technicians found</div>
                         )}
@@ -763,22 +908,151 @@ export function CreateTicketModal({ open, onOpenChange, onSuccess, preloadedCust
                     )}
                   </div>
                   {formData.assignedToName && (
-                    <div className='flex items-center justify-between bg-primary/8 border border-primary/20 rounded-lg px-3.5 py-2.5'>
-                      <div className='flex items-center gap-2'>
-                        <UserCheck className='h-3.5 w-3.5 text-primary' />
-                        <span className='text-sm font-medium text-primary'>{formData.assignedToName}</span>
+                    <>
+                      <div className='flex items-center justify-between bg-primary/8 border border-primary/20 rounded-lg px-3.5 py-2.5'>
+                        <div className='flex items-center gap-2 min-w-0'>
+                          <UserCheck className='h-3.5 w-3.5 text-primary shrink-0' />
+                          <span className='text-sm font-medium text-primary truncate'>{formData.assignedToName}</span>
+                          {formData.scheduledVisitDate &&
+                            !dateAvailabilityLoading &&
+                            (() => {
+                              const count = dateAvailability.get(formData.assignedTo) ?? 0;
+                              return (
+                                <span
+                                  className={`shrink-0 text-[11px] font-semibold px-1.5 py-0.5 rounded-full ${
+                                    count === 0
+                                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400'
+                                      : count <= 2
+                                        ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400'
+                                        : 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400'
+                                  }`}
+                                >
+                                  {count === 0 ? 'Free that day' : `${count} visit${count > 1 ? 's' : ''} that day`}
+                                </span>
+                              );
+                            })()}
+                        </div>
+                        <div className='flex items-center gap-1'>
+                          <button
+                            type='button'
+                            onClick={handleCheckAvailability}
+                            title="Check this week's availability"
+                            className={`flex items-center gap-1 text-xs px-2 py-1 rounded-md border transition-colors cursor-pointer ${
+                              showTechSchedule ? 'bg-primary/10 border-primary/30 text-primary' : 'border-border text-muted-foreground hover:border-primary/30 hover:text-primary'
+                            }`}
+                          >
+                            <CalendarSearch className='h-3 w-3' />
+                            <span className='hidden sm:inline'>Availability</span>
+                          </button>
+                          <button
+                            type='button'
+                            onClick={() => {
+                              setFormData((prev) => ({ ...prev, assignedTo: '', assignedToName: '' }));
+                              setTechnicianSearch('');
+                              setTechSchedule([]);
+                              setShowTechSchedule(false);
+                            }}
+                            className='text-muted-foreground hover:text-foreground transition-colors cursor-pointer ml-1'
+                          >
+                            <X className='h-3.5 w-3.5' />
+                          </button>
+                        </div>
                       </div>
-                      <button
-                        type='button'
-                        onClick={() => {
-                          setFormData((prev) => ({ ...prev, assignedTo: '', assignedToName: '' }));
-                          setTechnicianSearch('');
-                        }}
-                        className='text-muted-foreground hover:text-foreground transition-colors cursor-pointer'
-                      >
-                        <X className='h-3.5 w-3.5' />
-                      </button>
-                    </div>
+
+                      {/* Availability panel */}
+                      {showTechSchedule && (
+                        <div className='rounded-lg border border-border bg-muted/30 p-3 space-y-3'>
+                          <p className='text-xs font-semibold text-muted-foreground uppercase tracking-wide'>{formData.assignedToName}&apos;s schedule &mdash; next 7 days</p>
+
+                          {techScheduleLoading ? (
+                            <div className='flex items-center gap-2 py-1 text-sm text-muted-foreground'>
+                              <div className='h-3 w-3 rounded-full border-2 border-primary border-t-transparent animate-spin' />
+                              Loading schedule&hellip;
+                            </div>
+                          ) : techSchedule.length === 0 ? (
+                            <div className='flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400 py-1'>
+                              <CheckCircle2 className='h-3.5 w-3.5' />
+                              No visits this week &mdash; technician is available
+                            </div>
+                          ) : (
+                            <>
+                              {/* Conflict indicator vs selected visit date */}
+                              {formData.scheduledVisitDate &&
+                                (() => {
+                                  const sel = new Date(formData.scheduledVisitDate + 'T00:00');
+                                  const conflicts = techSchedule.filter((e) => {
+                                    const d = e.scheduledVisitDate;
+                                    return d.getFullYear() === sel.getFullYear() && d.getMonth() === sel.getMonth() && d.getDate() === sel.getDate();
+                                  });
+                                  return conflicts.length === 0 ? (
+                                    <div className='flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400'>
+                                      <CheckCircle2 className='h-3.5 w-3.5' />
+                                      No conflict on {sel.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                    </div>
+                                  ) : (
+                                    <div className='flex items-start gap-2 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2'>
+                                      <AlertTriangle className='h-3.5 w-3.5 text-amber-600 dark:text-amber-400 mt-px shrink-0' />
+                                      <p className='text-xs text-amber-700 dark:text-amber-300'>
+                                        <span className='font-semibold'>{formData.assignedToName}</span> already has {conflicts.length} visit
+                                        {conflicts.length > 1 ? 's' : ''} on {sel.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                      </p>
+                                    </div>
+                                  );
+                                })()}
+
+                              {/* Day-grouped schedule */}
+                              <div className='space-y-2'>
+                                {(() => {
+                                  const groups = new Map<string, { date: Date; entries: TechScheduleEntry[] }>();
+                                  for (const entry of techSchedule) {
+                                    const key = entry.scheduledVisitDate.toDateString();
+                                    if (!groups.has(key)) groups.set(key, { date: entry.scheduledVisitDate, entries: [] });
+                                    groups.get(key)!.entries.push(entry);
+                                  }
+                                  return Array.from(groups.values()).map(({ date, entries: dayEntries }) => {
+                                    const isConflict = formData.scheduledVisitDate
+                                      ? (() => {
+                                          const sel = new Date(formData.scheduledVisitDate + 'T00:00');
+                                          return date.getFullYear() === sel.getFullYear() && date.getMonth() === sel.getMonth() && date.getDate() === sel.getDate();
+                                        })()
+                                      : false;
+                                    return (
+                                      <div key={date.toDateString()} className={`rounded-md overflow-hidden border ${isConflict ? 'border-amber-300 dark:border-amber-700' : 'border-border'}`}>
+                                        <div
+                                          className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold ${
+                                            isConflict ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400' : 'bg-muted/50 text-muted-foreground'
+                                          }`}
+                                        >
+                                          {isConflict && <AlertTriangle className='h-3 w-3' />}
+                                          {date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                                          {isConflict && <span className='ml-auto font-semibold'>Conflict</span>}
+                                        </div>
+                                        <div className='divide-y divide-border/60'>
+                                          {dayEntries.map((entry) => (
+                                            <div key={entry.id} className='flex items-center gap-2.5 px-3 py-2 text-xs'>
+                                              <div className='shrink-0 font-medium text-primary w-16'>
+                                                {entry.scheduledVisitDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                                              </div>
+                                              <div className='flex-1 min-w-0'>
+                                                <p className='font-medium text-foreground truncate'>{entry.customerName}</p>
+                                                {entry.machineTypes.length > 0 && <p className='text-muted-foreground truncate'>{entry.machineTypes.slice(0, 2).join(', ')}</p>}
+                                              </div>
+                                              <Badge variant='outline' className='text-[10px] h-4 px-1 shrink-0'>
+                                                {entry.status}
+                                              </Badge>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    );
+                                  });
+                                })()}
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
 

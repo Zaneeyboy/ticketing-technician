@@ -15,9 +15,10 @@ import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { addBulkWorkLogEntries, closeTicket, generateSignOffToken, getWorkLogsForTicket } from '@/lib/actions/tickets';
+import { MachineHistoryModal } from './machine-history-modal';
 import { getPartsForSelection, type Part } from '@/lib/actions/parts';
 import { Ticket } from '@/lib/types';
-import { Loader2, CheckCircle, AlertCircle, Trash2, Plus, Wrench, Search, ClipboardCheck, CalendarIcon, Clock } from 'lucide-react';
+import { Loader2, CheckCircle, AlertCircle, Trash2, Plus, Wrench, Search, ClipboardCheck, CalendarIcon, Clock, History } from 'lucide-react';
 import { showToast } from '@/lib/toast';
 import { format } from 'date-fns';
 
@@ -241,6 +242,9 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess, onS
   const [partsLoading, setPartsLoading] = useState(false);
   const [checkedItems, setCheckedItems] = useState<Set<number>>(new Set());
   const [selectedMachineIds, setSelectedMachineIds] = useState<Set<string>>(() => new Set(machines.map((m) => m.machineId)));
+
+  // Machine history modal
+  const [historyMachine, setHistoryMachine] = useState<{ machineId: string; machineType: string; serialNumber: string } | null>(null);
 
   const toggleChecklistItem = (idx: number) =>
     setCheckedItems((prev) => {
@@ -679,433 +683,455 @@ export function LogWorkModal({ isOpen, onClose, ticket, machines, onSuccess, onS
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className='sm:max-w-3xl max-h-[92dvh] overflow-y-auto'>
-        <DialogHeader>
-          <div className='flex items-center justify-between'>
-            <DialogTitle>Log Work - Ticket {ticket.ticketNumber}</DialogTitle>
-            <Badge variant={ticket.status === 'Closed' ? 'default' : ticket.status === 'Assigned' ? 'secondary' : 'outline'} className='ml-2'>
-              {ticket.status}
-            </Badge>
-          </div>
-          <DialogDescription>Record work performed during your site visit. Visit details are shared across all machines.</DialogDescription>
-        </DialogHeader>
+    <>
+      <Dialog open={isOpen} onOpenChange={onClose}>
+        <DialogContent className='sm:max-w-3xl max-h-[92dvh] overflow-y-auto'>
+          <DialogHeader>
+            <div className='flex items-center justify-between'>
+              <DialogTitle>Log Work - Ticket {ticket.ticketNumber}</DialogTitle>
+              <Badge variant={ticket.status === 'Closed' ? 'default' : ticket.status === 'Assigned' ? 'secondary' : 'outline'} className='ml-2'>
+                {ticket.status}
+              </Badge>
+            </div>
+            <DialogDescription>Record work performed during your site visit. Visit details are shared across all machines.</DialogDescription>
+          </DialogHeader>
 
-        <form onSubmit={handleSubmit(onSubmit)} className='space-y-6'>
-          {/* VISIT-LEVEL DATA (Common across all machines) */}
-          <Card className='border-blue-200 bg-blue-50/50 dark:border-blue-900 dark:bg-blue-950/20'>
-            <CardHeader className='pb-3'>
-              <CardTitle className='text-sm flex items-center gap-2'>
-                <Wrench className='h-4 w-4' />
-                Site Visit Details (Same for All Machines)
-              </CardTitle>
-            </CardHeader>
-            <CardContent className='space-y-4'>
-              <div className='grid grid-cols-1 sm:grid-cols-2 gap-3'>
-                {/* Arrival Time */}
-                <div className='space-y-2'>
-                  <Label>Arrival Time *</Label>
-                  <Controller
-                    name='arrivalTime'
-                    control={control}
-                    render={({ field }) => (
-                      <DateTimePicker
-                        value={field.value}
-                        onChange={(d) => {
-                          visitTimesModifiedRef.current = true;
-                          field.onChange(d);
-                        }}
-                        placeholder='Pick arrival date'
-                      />
+          <form onSubmit={handleSubmit(onSubmit)} className='space-y-6'>
+            {/* VISIT-LEVEL DATA (Common across all machines) */}
+            <Card className='border-blue-200 bg-blue-50/50 dark:border-blue-900 dark:bg-blue-950/20'>
+              <CardHeader className='pb-3'>
+                <CardTitle className='text-sm flex items-center gap-2'>
+                  <Wrench className='h-4 w-4' />
+                  Site Visit Details (Same for All Machines)
+                </CardTitle>
+              </CardHeader>
+              <CardContent className='space-y-4'>
+                <div className='grid grid-cols-1 sm:grid-cols-2 gap-3'>
+                  {/* Arrival Time */}
+                  <div className='space-y-2'>
+                    <Label>Arrival Time *</Label>
+                    <Controller
+                      name='arrivalTime'
+                      control={control}
+                      render={({ field }) => (
+                        <DateTimePicker
+                          value={field.value}
+                          onChange={(d) => {
+                            visitTimesModifiedRef.current = true;
+                            field.onChange(d);
+                          }}
+                          placeholder='Pick arrival date'
+                        />
+                      )}
+                    />
+                    <p className='text-xs text-slate-600 dark:text-slate-400'>Auto-populated from scheduled date</p>
+                    {errors.arrivalTime && (
+                      <p className='text-sm text-red-500 flex items-center gap-1'>
+                        <AlertCircle className='h-3 w-3' />
+                        {errors.arrivalTime.message}
+                      </p>
                     )}
-                  />
-                  <p className='text-xs text-slate-600 dark:text-slate-400'>Auto-populated from scheduled date</p>
-                  {errors.arrivalTime && (
+                  </div>
+
+                  {/* Departure Time */}
+                  <div className='space-y-2'>
+                    <Label>Departure Time (Optional)</Label>
+                    <Controller
+                      name='departureTime'
+                      control={control}
+                      render={({ field }) => (
+                        <DateTimePicker
+                          value={field.value}
+                          onChange={(d) => {
+                            visitTimesModifiedRef.current = true;
+                            field.onChange(d);
+                          }}
+                          placeholder='Pick departure date'
+                        />
+                      )}
+                    />
+                    <p className='text-xs text-slate-600 dark:text-slate-400'>Auto-populated with current time</p>
+                    {errors.departureTime && (
+                      <p className='text-sm text-red-500 flex items-center gap-1'>
+                        <AlertCircle className='h-3 w-3' />
+                        {errors.departureTime.message}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Hours Worked */}
+                <div className='space-y-2'>
+                  <Label htmlFor='hoursWorked'>Total Hours Worked * (Auto-calculated)</Label>
+                  <Input id='hoursWorked' type='number' step='0.25' min='0.25' max='16' placeholder='Auto-calculated from times above' {...register('hoursWorked', { valueAsNumber: true })} />
+                  <p className='text-xs text-slate-600 dark:text-slate-400'>Automatically calculated from arrival/departure times. Edit if needed.</p>
+                  {errors.hoursWorked && (
                     <p className='text-sm text-red-500 flex items-center gap-1'>
                       <AlertCircle className='h-3 w-3' />
-                      {errors.arrivalTime.message}
+                      {errors.hoursWorked.message}
                     </p>
                   )}
                 </div>
+              </CardContent>
+            </Card>
 
-                {/* Departure Time */}
-                <div className='space-y-2'>
-                  <Label>Departure Time (Optional)</Label>
-                  <Controller
-                    name='departureTime'
-                    control={control}
-                    render={({ field }) => (
-                      <DateTimePicker
-                        value={field.value}
-                        onChange={(d) => {
-                          visitTimesModifiedRef.current = true;
-                          field.onChange(d);
-                        }}
-                        placeholder='Pick departure date'
-                      />
-                    )}
-                  />
-                  <p className='text-xs text-slate-600 dark:text-slate-400'>Auto-populated with current time</p>
-                  {errors.departureTime && (
-                    <p className='text-sm text-red-500 flex items-center gap-1'>
-                      <AlertCircle className='h-3 w-3' />
-                      {errors.departureTime.message}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* Hours Worked */}
-              <div className='space-y-2'>
-                <Label htmlFor='hoursWorked'>Total Hours Worked * (Auto-calculated)</Label>
-                <Input id='hoursWorked' type='number' step='0.25' min='0.25' max='16' placeholder='Auto-calculated from times above' {...register('hoursWorked', { valueAsNumber: true })} />
-                <p className='text-xs text-slate-600 dark:text-slate-400'>Automatically calculated from arrival/departure times. Edit if needed.</p>
-                {errors.hoursWorked && (
-                  <p className='text-sm text-red-500 flex items-center gap-1'>
-                    <AlertCircle className='h-3 w-3' />
-                    {errors.hoursWorked.message}
-                  </p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* MACHINE-SPECIFIC DATA (Per Machine) */}
-          <Card>
-            <CardHeader className='pb-3'>
-              <CardTitle className='text-sm'>Machine-Specific Work Details</CardTitle>
-              <p className='text-xs text-slate-600 dark:text-slate-400'>Fill in work details for each machine serviced</p>
-            </CardHeader>
-            <CardContent className='space-y-5'>
-              {/* Machine selection — shown for multi-machine tickets only */}
-              {machines.length > 1 && (
-                <div className='space-y-2 pb-4 border-b border-border'>
-                  <Label className='text-sm font-medium'>Which machines did you service this visit? *</Label>
-                  <div className='flex flex-wrap gap-2'>
-                    {machines.map((machine) => {
-                      const selected = selectedMachineIds.has(machine.machineId);
-                      return (
-                        <button
-                          key={machine.machineId}
-                          type='button'
-                          onClick={() => toggleMachineSelection(machine.machineId)}
-                          className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${
-                            selected ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-muted/30 text-muted-foreground hover:bg-muted/60'
-                          }`}
-                        >
-                          <span
-                            className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
-                              selected ? 'border-primary bg-primary' : 'border-muted-foreground/40 bg-background'
+            {/* MACHINE-SPECIFIC DATA (Per Machine) */}
+            <Card>
+              <CardHeader className='pb-3'>
+                <CardTitle className='text-sm'>Machine-Specific Work Details</CardTitle>
+                <p className='text-xs text-slate-600 dark:text-slate-400'>Fill in work details for each machine serviced</p>
+              </CardHeader>
+              <CardContent className='space-y-5'>
+                {/* Machine selection — shown for multi-machine tickets only */}
+                {machines.length > 1 && (
+                  <div className='space-y-2 pb-4 border-b border-border'>
+                    <Label className='text-sm font-medium'>Which machines did you service this visit? *</Label>
+                    <div className='flex flex-wrap gap-2'>
+                      {machines.map((machine) => {
+                        const selected = selectedMachineIds.has(machine.machineId);
+                        return (
+                          <button
+                            key={machine.machineId}
+                            type='button'
+                            onClick={() => toggleMachineSelection(machine.machineId)}
+                            className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${
+                              selected ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-muted/30 text-muted-foreground hover:bg-muted/60'
                             }`}
                           >
-                            {selected && (
-                              <svg className='h-2.5 w-2.5 text-primary-foreground' viewBox='0 0 12 10' fill='none'>
-                                <path d='M1 5l3.5 3.5L11 1' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' />
-                              </svg>
+                            <span
+                              className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                                selected ? 'border-primary bg-primary' : 'border-muted-foreground/40 bg-background'
+                              }`}
+                            >
+                              {selected && (
+                                <svg className='h-2.5 w-2.5 text-primary-foreground' viewBox='0 0 12 10' fill='none'>
+                                  <path d='M1 5l3.5 3.5L11 1' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' />
+                                </svg>
+                              )}
+                            </span>
+                            <span className='font-medium'>{machine.machineType}</span>
+                            <span className='text-xs opacity-60'>{machine.serialNumber}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {selectedMachineIds.size === 0 && (
+                      <p className='text-xs text-destructive flex items-center gap-1'>
+                        <AlertCircle className='h-3.5 w-3.5 shrink-0' />
+                        Select at least one machine to log work against.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {selectedMachineIds.size === 0 ? (
+                  <p className='py-6 text-center text-sm text-muted-foreground'>Select at least one machine above to enter work details.</p>
+                ) : (
+                  <div className='space-y-4'>
+                    {machines.map((machine, machineIdx) => {
+                      if (!selectedMachineIds.has(machine.machineId)) return null;
+                      const machineParts = machinePartsMap[machine.machineId] || [];
+                      const hasWork = !!(watch(`machineWorkLogs.${machineIdx}.workPerformed`) || watch(`machineWorkLogs.${machineIdx}.outcome`));
+
+                      return (
+                        <div key={machine.machineId} className='rounded-lg border border-border overflow-hidden'>
+                          {/* Machine header */}
+                          <div className='flex items-center gap-2.5 px-4 py-3 bg-muted/50 border-b border-border'>
+                            <Wrench className='h-3.5 w-3.5 text-muted-foreground shrink-0' />
+                            <span className='text-sm font-semibold'>{machine.machineType}</span>
+                            <Badge variant='outline' className='text-xs font-mono'>
+                              {machine.serialNumber}
+                            </Badge>
+                            {hasWork && (
+                              <span className='ml-auto flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 font-medium'>
+                                <CheckCircle className='h-3.5 w-3.5' />
+                                Filled
+                              </span>
                             )}
-                          </span>
-                          <span className='font-medium'>{machine.machineType}</span>
-                          <span className='text-xs opacity-60'>{machine.serialNumber}</span>
-                        </button>
+                            <button
+                              type='button'
+                              title='View service history for this machine'
+                              onClick={() => setHistoryMachine({ machineId: machine.machineId, machineType: machine.machineType, serialNumber: machine.serialNumber })}
+                              className={`flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-border text-muted-foreground hover:border-primary/40 hover:text-primary transition-colors cursor-pointer ${hasWork ? '' : 'ml-auto'}`}
+                            >
+                              <History className='h-3 w-3' />
+                              <span className='hidden sm:inline'>History</span>
+                            </button>
+                          </div>
+
+                          <div className='p-4 space-y-4'>
+                            {/* Work Performed */}
+                            <div className='space-y-2'>
+                              <Label htmlFor={`work-${machineIdx}`}>Work Performed *</Label>
+                              <Textarea
+                                id={`work-${machineIdx}`}
+                                placeholder={`Describe the work performed on this ${machine.machineType}...`}
+                                className='min-h-20'
+                                {...register(`machineWorkLogs.${machineIdx}.workPerformed`)}
+                              />
+                              {errors.machineWorkLogs?.[machineIdx]?.workPerformed && (
+                                <p className='text-sm text-red-500 flex items-center gap-1'>
+                                  <AlertCircle className='h-3 w-3' />
+                                  {errors.machineWorkLogs[machineIdx]?.workPerformed?.message}
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Repairs */}
+                            <div className='space-y-2'>
+                              <Label htmlFor={`repairs-${machineIdx}`}>Repairs &amp; Fixes</Label>
+                              <Textarea
+                                id={`repairs-${machineIdx}`}
+                                placeholder='Document any repairs, fixes, or replacements made...'
+                                className='min-h-16'
+                                {...register(`machineWorkLogs.${machineIdx}.repairs`)}
+                              />
+                            </div>
+
+                            {/* Parts Used */}
+                            <div className='space-y-3'>
+                              <div className='flex items-center justify-between'>
+                                <Label>Parts Used on This Machine</Label>
+                                <Button
+                                  type='button'
+                                  variant='outline'
+                                  size='sm'
+                                  onClick={() => addPartToMachine(machine.machineId)}
+                                  disabled={availableParts.length === 0 || partsLoading}
+                                  className='gap-1'
+                                >
+                                  <Plus className='h-3 w-3' />
+                                  Add Part
+                                </Button>
+                              </div>
+
+                              {partsLoading ? (
+                                <p className='text-xs text-slate-500 dark:text-slate-400'>Loading parts...</p>
+                              ) : machineParts.length > 0 ? (
+                                <div className='space-y-2'>
+                                  {machineParts.map((part, partIdx) => {
+                                    const selectedPart = availableParts.find((p) => p.id === part.partId);
+                                    const maxQty = selectedPart?.quantityInStock || 0;
+                                    const isQtyInvalid = part.quantity > maxQty;
+
+                                    return (
+                                      <div key={`${machine.machineId}-part-${partIdx}`} className='flex gap-2 items-center'>
+                                        <PartSearchCombobox
+                                          parts={availableParts}
+                                          value={part.partId || ''}
+                                          disabled={partsLoading}
+                                          onSelect={(selected) => {
+                                            updatePartForMachine(machine.machineId, partIdx, {
+                                              partId: selected.id,
+                                              partName: selected.name,
+                                              quantity: 1,
+                                              availableQty: selected.quantityInStock,
+                                            });
+                                          }}
+                                        />
+                                        <div className='w-24 space-y-1'>
+                                          <div className='text-xs text-slate-500 dark:text-slate-400'>Qty (Max: {maxQty})</div>
+                                          <Input
+                                            type='number'
+                                            min='1'
+                                            max={maxQty}
+                                            value={part.quantity}
+                                            onChange={(e) => {
+                                              const newQty = Math.min(parseInt(e.target.value) || 1, maxQty);
+                                              updatePartForMachine(machine.machineId, partIdx, { quantity: newQty });
+                                            }}
+                                            className={`bg-slate-50 dark:bg-slate-900 text-sm ${isQtyInvalid ? 'border-red-500' : ''}`}
+                                          />
+                                          {isQtyInvalid && <p className='text-xs text-red-500'>Exceeds stock</p>}
+                                        </div>
+                                        <Button
+                                          type='button'
+                                          variant='ghost'
+                                          size='sm'
+                                          onClick={() => removePartFromMachine(machine.machineId, partIdx)}
+                                          className='h-9 w-9 p-0 text-red-500 hover:text-red-700 dark:hover:text-red-400'
+                                        >
+                                          <Trash2 className='h-4 w-4' />
+                                        </Button>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                <p className='text-xs text-slate-500 dark:text-slate-400'>{availableParts.length === 0 ? 'No parts available in stock' : 'No parts added for this machine yet'}</p>
+                              )}
+                            </div>
+
+                            {/* Outcome */}
+                            <div className='space-y-2'>
+                              <Label htmlFor={`outcome-${machineIdx}`}>Outcome *</Label>
+                              <Textarea
+                                id={`outcome-${machineIdx}`}
+                                placeholder='Describe the outcome of the work and machine status...'
+                                className='min-h-20'
+                                {...register(`machineWorkLogs.${machineIdx}.outcome`)}
+                              />
+                              {errors.machineWorkLogs?.[machineIdx]?.outcome && (
+                                <p className='text-sm text-red-500 flex items-center gap-1'>
+                                  <AlertCircle className='h-3 w-3' />
+                                  {errors.machineWorkLogs[machineIdx]?.outcome?.message}
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Maintenance Recommendation */}
+                            <div className='space-y-3 p-3 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700'>
+                              <Label>Maintenance Recommendation (Optional)</Label>
+                              <div className='flex gap-2'>
+                                <Controller
+                                  name={`machineWorkLogs.${machineIdx}.maintenanceRecommendation.date`}
+                                  control={control}
+                                  render={({ field }) => (
+                                    <Input
+                                      type='date'
+                                      placeholder='Recommended date'
+                                      className='flex-1'
+                                      value={field.value instanceof Date ? format(field.value, 'yyyy-MM-dd') : ''}
+                                      onChange={(e) => field.onChange(e.target.value ? new Date(e.target.value) : undefined)}
+                                    />
+                                  )}
+                                />
+                              </div>
+                              <Textarea placeholder='Recommended maintenance or next steps...' className='min-h-16' {...register(`machineWorkLogs.${machineIdx}.maintenanceRecommendation.notes`)} />
+                            </div>
+                          </div>
+                        </div>
                       );
                     })}
                   </div>
-                  {selectedMachineIds.size === 0 && (
-                    <p className='text-xs text-destructive flex items-center gap-1'>
-                      <AlertCircle className='h-3.5 w-3.5 shrink-0' />
-                      Select at least one machine to log work against.
-                    </p>
-                  )}
+                )}
+              </CardContent>
+            </Card>
+
+            {/* ── Maintenance Checklist ─────────────────────────────── */}
+            <Card className='border-primary/20'>
+              <CardHeader className='pb-3'>
+                <div className='flex items-start justify-between gap-3'>
+                  <div className='flex items-center gap-2'>
+                    <div className='p-1.5 rounded-md bg-primary/10'>
+                      <ClipboardCheck className='h-4 w-4 text-primary' />
+                    </div>
+                    <div>
+                      <CardTitle className='text-sm'>CoffeeFix Maintenance Checklist</CardTitle>
+                      <p className='text-xs text-muted-foreground mt-0.5'>Required to close this ticket — check every task completed</p>
+                    </div>
+                  </div>
+                  {/* Progress pill */}
+                  <div
+                    className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${checkedItems.size === 0 ? 'bg-muted text-muted-foreground' : checkedItems.size === CHECKLIST_ITEMS.length ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' : 'bg-primary/10 text-primary'}`}
+                  >
+                    <span>{checkedItems.size}</span>
+                    <span className='opacity-60'>/</span>
+                    <span>{CHECKLIST_ITEMS.length}</span>
+                  </div>
                 </div>
-              )}
+              </CardHeader>
 
-              {selectedMachineIds.size === 0 ? (
-                <p className='py-6 text-center text-sm text-muted-foreground'>Select at least one machine above to enter work details.</p>
-              ) : (
-                <div className='space-y-4'>
-                  {machines.map((machine, machineIdx) => {
-                    if (!selectedMachineIds.has(machine.machineId)) return null;
-                    const machineParts = machinePartsMap[machine.machineId] || [];
-                    const hasWork = !!(watch(`machineWorkLogs.${machineIdx}.workPerformed`) || watch(`machineWorkLogs.${machineIdx}.outcome`));
-
+              <CardContent className='space-y-4'>
+                {/* Checklist grid */}
+                <div className='grid grid-cols-1 sm:grid-cols-2 gap-1.5'>
+                  {CHECKLIST_ITEMS.map((item, idx) => {
+                    const checked = checkedItems.has(idx);
                     return (
-                      <div key={machine.machineId} className='rounded-lg border border-border overflow-hidden'>
-                        {/* Machine header */}
-                        <div className='flex items-center gap-2.5 px-4 py-3 bg-muted/50 border-b border-border'>
-                          <Wrench className='h-3.5 w-3.5 text-muted-foreground shrink-0' />
-                          <span className='text-sm font-semibold'>{machine.machineType}</span>
-                          <Badge variant='outline' className='text-xs font-mono'>
-                            {machine.serialNumber}
-                          </Badge>
-                          {hasWork && (
-                            <span className='ml-auto flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 font-medium'>
-                              <CheckCircle className='h-3.5 w-3.5' />
-                              Filled
-                            </span>
+                      <button
+                        key={idx}
+                        type='button'
+                        onClick={() => toggleChecklistItem(idx)}
+                        className={`group flex items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors ${checked ? 'border-primary/30 bg-primary/5 dark:bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted/60'}`}
+                      >
+                        {/* Custom checkbox */}
+                        <span
+                          className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors ${checked ? 'border-primary bg-primary' : 'border-muted-foreground/40 bg-background group-hover:border-primary/60'}`}
+                        >
+                          {checked && (
+                            <svg className='h-2.5 w-2.5 text-primary-foreground' viewBox='0 0 12 10' fill='none'>
+                              <path d='M1 5l3.5 3.5L11 1' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' />
+                            </svg>
                           )}
-                        </div>
-
-                        <div className='p-4 space-y-4'>
-                          {/* Work Performed */}
-                          <div className='space-y-2'>
-                            <Label htmlFor={`work-${machineIdx}`}>Work Performed *</Label>
-                            <Textarea
-                              id={`work-${machineIdx}`}
-                              placeholder={`Describe the work performed on this ${machine.machineType}...`}
-                              className='min-h-20'
-                              {...register(`machineWorkLogs.${machineIdx}.workPerformed`)}
-                            />
-                            {errors.machineWorkLogs?.[machineIdx]?.workPerformed && (
-                              <p className='text-sm text-red-500 flex items-center gap-1'>
-                                <AlertCircle className='h-3 w-3' />
-                                {errors.machineWorkLogs[machineIdx]?.workPerformed?.message}
-                              </p>
-                            )}
-                          </div>
-
-                          {/* Repairs */}
-                          <div className='space-y-2'>
-                            <Label htmlFor={`repairs-${machineIdx}`}>Repairs &amp; Fixes</Label>
-                            <Textarea
-                              id={`repairs-${machineIdx}`}
-                              placeholder='Document any repairs, fixes, or replacements made...'
-                              className='min-h-16'
-                              {...register(`machineWorkLogs.${machineIdx}.repairs`)}
-                            />
-                          </div>
-
-                          {/* Parts Used */}
-                          <div className='space-y-3'>
-                            <div className='flex items-center justify-between'>
-                              <Label>Parts Used on This Machine</Label>
-                              <Button
-                                type='button'
-                                variant='outline'
-                                size='sm'
-                                onClick={() => addPartToMachine(machine.machineId)}
-                                disabled={availableParts.length === 0 || partsLoading}
-                                className='gap-1'
-                              >
-                                <Plus className='h-3 w-3' />
-                                Add Part
-                              </Button>
-                            </div>
-
-                            {partsLoading ? (
-                              <p className='text-xs text-slate-500 dark:text-slate-400'>Loading parts...</p>
-                            ) : machineParts.length > 0 ? (
-                              <div className='space-y-2'>
-                                {machineParts.map((part, partIdx) => {
-                                  const selectedPart = availableParts.find((p) => p.id === part.partId);
-                                  const maxQty = selectedPart?.quantityInStock || 0;
-                                  const isQtyInvalid = part.quantity > maxQty;
-
-                                  return (
-                                    <div key={`${machine.machineId}-part-${partIdx}`} className='flex gap-2 items-center'>
-                                      <PartSearchCombobox
-                                        parts={availableParts}
-                                        value={part.partId || ''}
-                                        disabled={partsLoading}
-                                        onSelect={(selected) => {
-                                          updatePartForMachine(machine.machineId, partIdx, {
-                                            partId: selected.id,
-                                            partName: selected.name,
-                                            quantity: 1,
-                                            availableQty: selected.quantityInStock,
-                                          });
-                                        }}
-                                      />
-                                      <div className='w-24 space-y-1'>
-                                        <div className='text-xs text-slate-500 dark:text-slate-400'>Qty (Max: {maxQty})</div>
-                                        <Input
-                                          type='number'
-                                          min='1'
-                                          max={maxQty}
-                                          value={part.quantity}
-                                          onChange={(e) => {
-                                            const newQty = Math.min(parseInt(e.target.value) || 1, maxQty);
-                                            updatePartForMachine(machine.machineId, partIdx, { quantity: newQty });
-                                          }}
-                                          className={`bg-slate-50 dark:bg-slate-900 text-sm ${isQtyInvalid ? 'border-red-500' : ''}`}
-                                        />
-                                        {isQtyInvalid && <p className='text-xs text-red-500'>Exceeds stock</p>}
-                                      </div>
-                                      <Button
-                                        type='button'
-                                        variant='ghost'
-                                        size='sm'
-                                        onClick={() => removePartFromMachine(machine.machineId, partIdx)}
-                                        className='h-9 w-9 p-0 text-red-500 hover:text-red-700 dark:hover:text-red-400'
-                                      >
-                                        <Trash2 className='h-4 w-4' />
-                                      </Button>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            ) : (
-                              <p className='text-xs text-slate-500 dark:text-slate-400'>{availableParts.length === 0 ? 'No parts available in stock' : 'No parts added for this machine yet'}</p>
-                            )}
-                          </div>
-
-                          {/* Outcome */}
-                          <div className='space-y-2'>
-                            <Label htmlFor={`outcome-${machineIdx}`}>Outcome *</Label>
-                            <Textarea
-                              id={`outcome-${machineIdx}`}
-                              placeholder='Describe the outcome of the work and machine status...'
-                              className='min-h-20'
-                              {...register(`machineWorkLogs.${machineIdx}.outcome`)}
-                            />
-                            {errors.machineWorkLogs?.[machineIdx]?.outcome && (
-                              <p className='text-sm text-red-500 flex items-center gap-1'>
-                                <AlertCircle className='h-3 w-3' />
-                                {errors.machineWorkLogs[machineIdx]?.outcome?.message}
-                              </p>
-                            )}
-                          </div>
-
-                          {/* Maintenance Recommendation */}
-                          <div className='space-y-3 p-3 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700'>
-                            <Label>Maintenance Recommendation (Optional)</Label>
-                            <div className='flex gap-2'>
-                              <Controller
-                                name={`machineWorkLogs.${machineIdx}.maintenanceRecommendation.date`}
-                                control={control}
-                                render={({ field }) => (
-                                  <Input
-                                    type='date'
-                                    placeholder='Recommended date'
-                                    className='flex-1'
-                                    value={field.value instanceof Date ? format(field.value, 'yyyy-MM-dd') : ''}
-                                    onChange={(e) => field.onChange(e.target.value ? new Date(e.target.value) : undefined)}
-                                  />
-                                )}
-                              />
-                            </div>
-                            <Textarea placeholder='Recommended maintenance or next steps...' className='min-h-16' {...register(`machineWorkLogs.${machineIdx}.maintenanceRecommendation.notes`)} />
-                          </div>
-                        </div>
-                      </div>
+                        </span>
+                        {/* Number badge + label */}
+                        <span className='flex items-start gap-2 min-w-0'>
+                          <span className={`mt-px shrink-0 text-[10px] font-bold tabular-nums ${checked ? 'text-primary' : 'text-muted-foreground'}`}>{String(idx + 1).padStart(2, '0')}</span>
+                          <span className={`text-xs leading-relaxed ${checked ? 'text-foreground' : 'text-muted-foreground'}`}>{item}</span>
+                        </span>
+                      </button>
                     );
                   })}
                 </div>
-              )}
-            </CardContent>
-          </Card>
 
-          {/* ── Maintenance Checklist ─────────────────────────────── */}
-          <Card className='border-primary/20'>
-            <CardHeader className='pb-3'>
-              <div className='flex items-start justify-between gap-3'>
-                <div className='flex items-center gap-2'>
-                  <div className='p-1.5 rounded-md bg-primary/10'>
-                    <ClipboardCheck className='h-4 w-4 text-primary' />
-                  </div>
-                  <div>
-                    <CardTitle className='text-sm'>CoffeeFix Maintenance Checklist</CardTitle>
-                    <p className='text-xs text-muted-foreground mt-0.5'>Required to close this ticket — check every task completed</p>
-                  </div>
+                {/* Sign-off statement */}
+                <div className='rounded-lg bg-muted/50 border border-border px-4 py-3'>
+                  <p className='text-xs text-muted-foreground leading-relaxed italic'>
+                    By clicking <span className='font-semibold not-italic'>Complete &amp; Send for Sign-Off</span>, you confirm that all checked items on this checklist have been completed and
+                    verified by you. A sign-off link will be generated for the customer to review and digitally sign before the ticket is closed.
+                  </p>
                 </div>
-                {/* Progress pill */}
-                <div
-                  className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${checkedItems.size === 0 ? 'bg-muted text-muted-foreground' : checkedItems.size === CHECKLIST_ITEMS.length ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' : 'bg-primary/10 text-primary'}`}
-                >
-                  <span>{checkedItems.size}</span>
-                  <span className='opacity-60'>/</span>
-                  <span>{CHECKLIST_ITEMS.length}</span>
-                </div>
-              </div>
-            </CardHeader>
 
-            <CardContent className='space-y-4'>
-              {/* Checklist grid */}
-              <div className='grid grid-cols-1 sm:grid-cols-2 gap-1.5'>
-                {CHECKLIST_ITEMS.map((item, idx) => {
-                  const checked = checkedItems.has(idx);
-                  return (
-                    <button
-                      key={idx}
-                      type='button'
-                      onClick={() => toggleChecklistItem(idx)}
-                      className={`group flex items-start gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors ${checked ? 'border-primary/30 bg-primary/5 dark:bg-primary/10' : 'border-border bg-muted/30 hover:bg-muted/60'}`}
-                    >
-                      {/* Custom checkbox */}
-                      <span
-                        className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors ${checked ? 'border-primary bg-primary' : 'border-muted-foreground/40 bg-background group-hover:border-primary/60'}`}
-                      >
-                        {checked && (
-                          <svg className='h-2.5 w-2.5 text-primary-foreground' viewBox='0 0 12 10' fill='none'>
-                            <path d='M1 5l3.5 3.5L11 1' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' />
-                          </svg>
-                        )}
-                      </span>
-                      {/* Number badge + label */}
-                      <span className='flex items-start gap-2 min-w-0'>
-                        <span className={`mt-px shrink-0 text-[10px] font-bold tabular-nums ${checked ? 'text-primary' : 'text-muted-foreground'}`}>{String(idx + 1).padStart(2, '0')}</span>
-                        <span className={`text-xs leading-relaxed ${checked ? 'text-foreground' : 'text-muted-foreground'}`}>{item}</span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+                {checkedItems.size === 0 && (
+                  <p className='flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400'>
+                    <AlertCircle className='h-3.5 w-3.5 shrink-0' />
+                    Check at least one completed task to enable ticket closure.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
 
-              {/* Sign-off statement */}
-              <div className='rounded-lg bg-muted/50 border border-border px-4 py-3'>
-                <p className='text-xs text-muted-foreground leading-relaxed italic'>
-                  By clicking <span className='font-semibold not-italic'>Complete &amp; Send for Sign-Off</span>, you confirm that all checked items on this checklist have been completed and verified
-                  by you. A sign-off link will be generated for the customer to review and digitally sign before the ticket is closed.
-                </p>
-              </div>
+            {/* Submit Buttons */}
+            <div className='flex flex-col-reverse sm:flex-row gap-3 pt-4'>
+              <Button type='submit' disabled={submitting || closingTicket || selectedMachineIds.size === 0} className='flex-1 sm:flex-1'>
+                {submitting ? (
+                  <>
+                    <Loader2 className='h-4 w-4 mr-2 animate-spin' />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className='h-4 w-4 mr-2' />
+                    Save Work Logs
+                  </>
+                )}
+              </Button>
+              <Button
+                type='button'
+                onClick={handleSubmit(handleSaveAndClose)}
+                disabled={submitting || closingTicket || selectedMachineIds.size === 0}
+                className='flex-1 bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-800'
+              >
+                {closingTicket ? (
+                  <>
+                    <Loader2 className='h-4 w-4 mr-2 animate-spin' />
+                    Generating link...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className='h-4 w-4 mr-2' />
+                    Complete &amp; Send for Sign-Off
+                  </>
+                )}
+              </Button>
+              <Button type='button' variant='outline' onClick={onClose} disabled={submitting || closingTicket} className='w-full sm:w-24'>
+                Cancel
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
-              {checkedItems.size === 0 && (
-                <p className='flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400'>
-                  <AlertCircle className='h-3.5 w-3.5 shrink-0' />
-                  Check at least one completed task to enable ticket closure.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Submit Buttons */}
-          <div className='flex flex-col-reverse sm:flex-row gap-3 pt-4'>
-            <Button type='submit' disabled={submitting || closingTicket || selectedMachineIds.size === 0} className='flex-1 sm:flex-1'>
-              {submitting ? (
-                <>
-                  <Loader2 className='h-4 w-4 mr-2 animate-spin' />
-                  Saving...
-                </>
-              ) : (
-                <>
-                  <CheckCircle className='h-4 w-4 mr-2' />
-                  Save Work Logs
-                </>
-              )}
-            </Button>
-            <Button
-              type='button'
-              onClick={handleSubmit(handleSaveAndClose)}
-              disabled={submitting || closingTicket || selectedMachineIds.size === 0}
-              className='flex-1 bg-green-600 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-800'
-            >
-              {closingTicket ? (
-                <>
-                  <Loader2 className='h-4 w-4 mr-2 animate-spin' />
-                  Generating link...
-                </>
-              ) : (
-                <>
-                  <CheckCircle className='h-4 w-4 mr-2' />
-                  Complete &amp; Send for Sign-Off
-                </>
-              )}
-            </Button>
-            <Button type='button' variant='outline' onClick={onClose} disabled={submitting || closingTicket} className='w-full sm:w-24'>
-              Cancel
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
+      {/* Machine history modal */}
+      <MachineHistoryModal
+        open={historyMachine !== null}
+        onOpenChange={(open) => {
+          if (!open) setHistoryMachine(null);
+        }}
+        machineId={historyMachine?.machineId ?? ''}
+        machineType={historyMachine?.machineType ?? ''}
+        serialNumber={historyMachine?.serialNumber ?? ''}
+      />
+    </>
   );
 }

@@ -17,6 +17,7 @@ export interface WorkLogEntry {
   workPerformed?: string;
   outcome?: string;
   repairs?: string;
+  checklistItems?: number[];
   partsUsed?: Array<{
     partId: string;
     partName: string;
@@ -64,6 +65,7 @@ const getCachedWorkLogsForTicket = (storeId: string, ticketId: string) =>
           workPerformed: data.workPerformed,
           outcome: data.outcome,
           repairs: data.repairs,
+          checklistItems: data.checklistItems || [],
           partsUsed: data.partsUsed || [],
           maintenanceRecommendation: data.maintenanceRecommendation
             ? {

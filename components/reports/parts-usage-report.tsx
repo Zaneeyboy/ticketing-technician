@@ -15,13 +15,21 @@ import { ArrowLeft, ArrowUpDown, Package, Users } from 'lucide-react';
 import { ExportButton } from '@/components/export-button';
 import { buildReportMetadata, type ExportColumn } from '@/lib/export';
 
-const DEFAULT_FILTERS: ReportFiltersState = {
+const thisMonthStart = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+};
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
+const getDefaultFilters = (): ReportFiltersState => ({
   statuses: [],
   technicianIds: [],
   customerIds: [],
   partNames: [],
   partCategories: [],
-};
+  startDate: thisMonthStart(),
+  endDate: todayStr(),
+});
 
 const getFilterDate = (value?: string) => (value ? new Date(`${value}T00:00:00`) : null);
 const getFilterEndDate = (value?: string) => (value ? new Date(`${value}T23:59:59`) : null);
@@ -169,7 +177,7 @@ function ByPartView({ filters, search }: { filters: ReportFiltersState; search: 
         <Card>
           <CardContent className='pt-6'>
             <p className='text-sm text-muted-foreground'>Avg Units per Part</p>
-            <p className='text-2xl font-bold'>{sorted.length > 0 ? (totalQty / sorted.length).toFixed(1) : '0'}</p>
+            <p className='text-2xl font-bold'>{sorted.length > 0 ? (totalQty / sorted.length).toFixed(2) : '0'}</p>
           </CardContent>
         </Card>
       </div>
@@ -387,7 +395,7 @@ function ByCustomerView({ filters, search }: { filters: ReportFiltersState; sear
         <Card>
           <CardContent className='pt-6'>
             <p className='text-sm text-muted-foreground'>Avg Parts per Customer</p>
-            <p className='text-2xl font-bold'>{filtered.length > 0 ? (filtered.reduce((s, r) => s + r.partsUsed.length, 0) / filtered.length).toFixed(1) : '0'}</p>
+            <p className='text-2xl font-bold'>{filtered.length > 0 ? (filtered.reduce((s, r) => s + r.partsUsed.length, 0) / filtered.length).toFixed(2) : '0'}</p>
           </CardContent>
         </Card>
       </div>
@@ -488,7 +496,7 @@ function ByCustomerView({ filters, search }: { filters: ReportFiltersState; sear
 export function PartsUsageReport() {
   const data = useReportData();
   const router = useRouter();
-  const [filters, setFilters] = useState<ReportFiltersState>(DEFAULT_FILTERS);
+  const [filters, setFilters] = useState<ReportFiltersState>(getDefaultFilters);
   const [search, setSearch] = useState('');
 
   return (
@@ -503,7 +511,16 @@ export function PartsUsageReport() {
         </div>
       </div>
 
-      <ReportFilters filters={filters} onChange={setFilters} customers={data.customers} technicians={data.technicians} parts={data.parts} showTechnicians={false} showStatuses={false} />
+      <ReportFilters
+        filters={filters}
+        onChange={setFilters}
+        onResetAll={() => setFilters(getDefaultFilters())}
+        customers={data.customers}
+        technicians={data.technicians}
+        parts={data.parts}
+        showTechnicians={false}
+        showStatuses={false}
+      />
 
       <div className='flex gap-3'>
         <Input placeholder='Search...' value={search} onChange={(e) => setSearch(e.target.value)} className='max-w-xs' />

@@ -47,7 +47,7 @@ export async function getParts(): Promise<Part[]> {
 export async function createPart(data: any) {
   try {
     const user = await getCurrentUser();
-    if (!user?.storeId || !['super_admin', 'store_admin'].includes(user.role)) {
+    if (!user?.storeId || !['super_admin', 'store_admin', 'call_admin'].includes(user.role)) {
       return { success: false, error: 'Unauthorized' };
     }
 
@@ -72,7 +72,7 @@ export async function createPart(data: any) {
 export async function updatePart(partId: string, data: any) {
   try {
     const user = await getCurrentUser();
-    if (!user?.storeId || !['super_admin', 'store_admin'].includes(user.role)) {
+    if (!user?.storeId || !['super_admin', 'store_admin', 'call_admin'].includes(user.role)) {
       return { success: false, error: 'Unauthorized' };
     }
 
@@ -98,7 +98,7 @@ export async function updatePart(partId: string, data: any) {
 export async function deletePart(partId: string) {
   try {
     const user = await getCurrentUser();
-    if (!user?.storeId || !['super_admin', 'store_admin'].includes(user.role)) {
+    if (!user?.storeId || !['super_admin', 'store_admin', 'call_admin'].includes(user.role)) {
       return { success: false, error: 'Unauthorized' };
     }
 
@@ -181,7 +181,7 @@ export interface BulkImportResult {
 export async function bulkCreateParts(rows: BulkPartRow[], updateExisting = false): Promise<BulkImportResult> {
   try {
     const user = await getCurrentUser();
-    if (!user?.storeId || !['super_admin', 'store_admin'].includes(user.role)) {
+    if (!user?.storeId || !['super_admin', 'store_admin', 'call_admin'].includes(user.role)) {
       return { success: false, created: 0, updated: 0, skipped: [], errors: [], error: 'Unauthorized' };
     }
 

@@ -11,6 +11,61 @@ import type { TicketStatus } from '@/lib/types';
 import { Filter, CalendarIcon, RotateCcw, ChevronDown } from 'lucide-react';
 import { format } from 'date-fns';
 
+// ─── Date preset helpers ──────────────────────────────────────────────────────
+
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
+const nDaysAgoStr = (n: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+};
+
+const startOfWeekStr = () => {
+  const d = new Date();
+  // Monday as start of week
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().slice(0, 10);
+};
+
+const firstOfMonthStr = () => {
+  const n = new Date();
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-01`;
+};
+
+const lastMonthRange = (): { start: string; end: string } => {
+  const n = new Date();
+  const lastDay = new Date(n.getFullYear(), n.getMonth(), 0);
+  const firstDay = new Date(lastDay.getFullYear(), lastDay.getMonth(), 1);
+  return { start: firstDay.toISOString().slice(0, 10), end: lastDay.toISOString().slice(0, 10) };
+};
+
+const threeMonthsAgoFirstStr = () => {
+  const n = new Date();
+  const d = new Date(n.getFullYear(), n.getMonth() - 2, 1);
+  return d.toISOString().slice(0, 10);
+};
+
+const firstOfYearStr = () => `${new Date().getFullYear()}-01-01`;
+
+interface DatePreset {
+  id: string;
+  label: string;
+  getRange: () => { start: string; end: string };
+}
+
+const DATE_PRESETS: DatePreset[] = [
+  { id: 'thisweek', label: 'This Week', getRange: () => ({ start: startOfWeekStr(), end: todayStr() }) },
+  { id: 'thismonth', label: 'This Month', getRange: () => ({ start: firstOfMonthStr(), end: todayStr() }) },
+  { id: 'last30', label: 'Last 30 Days', getRange: () => ({ start: nDaysAgoStr(29), end: todayStr() }) },
+  { id: 'lastmonth', label: 'Last Month', getRange: () => lastMonthRange() },
+  { id: 'last3months', label: 'Last 3 Months', getRange: () => ({ start: threeMonthsAgoFirstStr(), end: todayStr() }) },
+  { id: 'thisyear', label: 'This Year', getRange: () => ({ start: firstOfYearStr(), end: todayStr() }) },
+  { id: 'alltime', label: 'All Time', getRange: () => ({ start: '', end: '' }) },
+];
+
 interface Option {
   value: string;
   label: string;
@@ -120,7 +175,21 @@ export function ReportFilters({
     label: category,
   }));
 
-  const update = (next: Partial<ReportFilters>) => onChange({ ...filters, ...next });
+  const [activePreset, setActivePreset] = useState<string | null>('thismonth');
+  const [startOpen, setStartOpen] = useState(false);
+  const [endOpen, setEndOpen] = useState(false);
+
+  const update = (next: Partial<ReportFilters>) => {
+    // If the user manually changes dates, clear the active preset highlight
+    if ('startDate' in next || 'endDate' in next) setActivePreset(null);
+    onChange({ ...filters, ...next });
+  };
+
+  const applyPreset = (preset: DatePreset) => {
+    const { start, end } = preset.getRange();
+    setActivePreset(preset.id);
+    onChange({ ...filters, startDate: start || undefined, endDate: end || undefined });
+  };
 
   return (
     <Card>
@@ -131,7 +200,15 @@ export function ReportFilters({
             <CardTitle className='text-base'>Filters</CardTitle>
           </div>
           {onResetAll && (
-            <Button variant='ghost' size='sm' onClick={onResetAll} className='h-8 gap-1.5 text-xs'>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => {
+                setActivePreset('thismonth');
+                onResetAll();
+              }}
+              className='h-8 gap-1.5 text-xs'
+            >
               <RotateCcw className='h-3 w-3' />
               Reset all
             </Button>
@@ -139,13 +216,25 @@ export function ReportFilters({
         </div>
       </CardHeader>
       <CardContent className='space-y-4'>
+        {/* Quick date presets */}
+        <div className='space-y-2'>
+          <h4 className='text-xs font-semibold text-foreground'>Quick Range</h4>
+          <div className='flex flex-wrap gap-1.5'>
+            {DATE_PRESETS.map((preset) => (
+              <Button key={preset.id} variant={activePreset === preset.id ? 'default' : 'outline'} size='sm' className='h-7 px-2.5 text-xs' onClick={() => applyPreset(preset)}>
+                {preset.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+
         {/* Date Range Section */}
         <div className='space-y-2'>
-          <h4 className='text-xs font-semibold text-foreground'>Date Range</h4>
+          <h4 className='text-xs font-semibold text-foreground'>Custom Range</h4>
           <div className='grid gap-3 md:grid-cols-2'>
             <div className='space-y-2'>
               <label className='text-xs font-medium text-muted-foreground'>Start date</label>
-              <Popover>
+              <Popover open={startOpen} onOpenChange={setStartOpen}>
                 <PopoverTrigger asChild>
                   <Button variant='outline' className='w-full justify-start text-left font-normal'>
                     <CalendarIcon className='mr-2 h-4 w-4' />
@@ -156,7 +245,10 @@ export function ReportFilters({
                   <Calendar
                     mode='single'
                     selected={filters.startDate ? new Date(filters.startDate) : undefined}
-                    onSelect={(date) => update({ startDate: date ? format(date, 'yyyy-MM-dd') : undefined })}
+                    onSelect={(date) => {
+                      update({ startDate: date ? format(date, 'yyyy-MM-dd') : undefined });
+                      setStartOpen(false);
+                    }}
                     initialFocus
                   />
                 </PopoverContent>
@@ -164,7 +256,7 @@ export function ReportFilters({
             </div>
             <div className='space-y-2'>
               <label className='text-xs font-medium text-muted-foreground'>End date</label>
-              <Popover>
+              <Popover open={endOpen} onOpenChange={setEndOpen}>
                 <PopoverTrigger asChild>
                   <Button variant='outline' className='w-full justify-start text-left font-normal'>
                     <CalendarIcon className='mr-2 h-4 w-4' />
@@ -175,7 +267,10 @@ export function ReportFilters({
                   <Calendar
                     mode='single'
                     selected={filters.endDate ? new Date(filters.endDate) : undefined}
-                    onSelect={(date) => update({ endDate: date ? format(date, 'yyyy-MM-dd') : undefined })}
+                    onSelect={(date) => {
+                      update({ endDate: date ? format(date, 'yyyy-MM-dd') : undefined });
+                      setEndOpen(false);
+                    }}
                     initialFocus
                   />
                 </PopoverContent>

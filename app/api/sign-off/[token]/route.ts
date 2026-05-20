@@ -154,7 +154,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     const ticketRef = adminDb.collection('stores').doc(td.storeId).collection('tickets').doc(td.ticketId);
     const ticketSnap = await ticketRef.get();
     if (!ticketSnap.exists) return NextResponse.json({ error: 'Ticket not found.' }, { status: 404 });
-    if (['Closed', 'Signed Off'].includes(ticketSnap.data()?.status)) {
+    const currentStatus = ticketSnap.data()?.status;
+    if (currentStatus === 'Closed' || currentStatus === 'Signed Off') {
       return NextResponse.json({ error: 'already_signed', message: 'This ticket has already been signed off.' }, { status: 410 });
     }
 
@@ -164,7 +165,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
     await adminDb.runTransaction(async (tx) => {
       tx.update(tokenRef, { used: true, usedAt: nowTs });
       tx.update(ticketRef, {
-        status: 'Signed Off',
+        status: 'Closed',
+        closedAt: nowTs,
         signedOffAt: nowTs,
         updatedAt: nowTs,
         customerSignOff: {
@@ -175,11 +177,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ tok
           comments: comments?.trim() || null,
         },
         statusHistory: FieldValue.arrayUnion({
-          status: 'Signed Off',
+          status: 'Closed',
           changedAt: nowTs,
           changedByUid: 'customer',
           changedByName: signedByName.trim(),
-          note: 'Signed off by customer',
+          note: 'Closed — signed off by customer',
         }),
       });
     });

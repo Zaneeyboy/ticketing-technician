@@ -38,20 +38,28 @@ const TECHNICIAN_SUMMARY_EXPORT_COLUMNS: ExportColumn[] = [
   { header: 'Avg Hours / Visit', key: 'avgHours' },
 ];
 
-const DEFAULT_FILTERS: ReportFiltersState = {
+const thisMonthStart = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+};
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
+const getDefaultFilters = (): ReportFiltersState => ({
   statuses: [],
   technicianIds: [],
   customerIds: [],
   partNames: [],
   partCategories: [],
-};
+  startDate: thisMonthStart(),
+  endDate: todayStr(),
+});
 
 const getFilterDate = (value?: string) => (value ? new Date(`${value}T00:00:00`) : null);
 const getFilterEndDate = (value?: string) => (value ? new Date(`${value}T23:59:59`) : null);
 
 export function TimeByTechnicianReport() {
   const data = useReportData();
-  const [filters, setFilters] = useState<ReportFiltersState>(DEFAULT_FILTERS);
+  const [filters, setFilters] = useState<ReportFiltersState>(getDefaultFilters);
 
   const partsCategoryMap = useMemo(() => new Map(data.parts.map((part) => [part.name, part.category || ''])), [data.parts]);
   const ticketMap = useMemo(() => new Map(data.tickets.map((ticket) => [ticket.id, ticket])), [data.tickets]);
@@ -265,7 +273,7 @@ export function TimeByTechnicianReport() {
         />
       </div>
 
-      <ReportFilters filters={filters} onChange={setFilters} onResetAll={() => setFilters(DEFAULT_FILTERS)} technicians={data.technicians} customers={data.customers} parts={data.parts} />
+      <ReportFilters filters={filters} onChange={setFilters} onResetAll={() => setFilters(getDefaultFilters())} technicians={data.technicians} customers={data.customers} parts={data.parts} />
 
       <div className='grid gap-4 md:grid-cols-2 lg:grid-cols-4'>
         <Card>
@@ -281,7 +289,7 @@ export function TimeByTechnicianReport() {
             <CardTitle className='text-sm text-muted-foreground'>Total Hours</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className='text-2xl font-semibold'>{totalHours.toFixed(1)}h</div>
+            <div className='text-2xl font-semibold'>{totalHours.toFixed(2)}h</div>
           </CardContent>
         </Card>
         <Card>
@@ -364,7 +372,7 @@ export function TimeByTechnicianReport() {
                         </TableCell>
                         <TableCell className='text-right'>
                           <Badge variant='outline' className='bg-secondary/10 dark:bg-secondary/20 text-secondary border-secondary/30'>
-                            {row.totalHours.toFixed(1)}h
+                            {row.totalHours.toFixed(2)}h
                           </Badge>
                         </TableCell>
                         <TableCell className='text-right'>{row.completedCount}</TableCell>
@@ -423,7 +431,7 @@ export function TimeByTechnicianReport() {
                                 <div className='grid grid-cols-2 md:grid-cols-4 gap-3 p-4 bg-muted/50 rounded-lg'>
                                   <div>
                                     <div className='text-xs text-muted-foreground'>Total Hours</div>
-                                    <div className='text-lg font-semibold'>{row.totalHours.toFixed(1)}h</div>
+                                    <div className='text-lg font-semibold'>{row.totalHours.toFixed(2)}h</div>
                                   </div>
                                   <div>
                                     <div className='text-xs text-muted-foreground'>Visits Done</div>
@@ -446,7 +454,7 @@ export function TimeByTechnicianReport() {
                                       <div key={customer.customerId} className='flex items-center justify-between p-2 rounded-md border bg-card'>
                                         <span className='text-sm font-medium'>{customer.customerName}</span>
                                         <Badge className='bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'>
-                                          {customer.hours.toFixed(1)}h
+                                          {customer.hours.toFixed(2)}h
                                         </Badge>
                                       </div>
                                     ))}
@@ -552,7 +560,7 @@ export function TimeByTechnicianReport() {
                                                   <TableCell className='text-xs'>{log.customerName}</TableCell>
                                                   <TableCell className='text-right'>
                                                     <Badge variant='outline' className='text-xs'>
-                                                      {log.hoursWorked?.toFixed(1) || '0.0'}h
+                                                      {log.hoursWorked?.toFixed(2) || '0.0'}h
                                                     </Badge>
                                                   </TableCell>
                                                   <TableCell className='text-xs'>{machineLabel}</TableCell>

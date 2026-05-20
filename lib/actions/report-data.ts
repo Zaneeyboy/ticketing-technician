@@ -20,101 +20,124 @@ const toIsoString = (value: any) => {
   return null;
 };
 
-const getCachedReportBaseData = unstable_cache(
-  async (): Promise<ReportBaseData> => {
-    const [ticketsSnap, workLogsSnap, customersSnap, machinesSnap, techniciansSnap, partsSnap] = await Promise.all([
-      adminDb.collection('tickets').get(),
-      adminDb.collection('machineWorkLogs').get(),
-      adminDb.collection('customers').get(),
-      adminDb.collection('machines').get(),
-      adminDb.collection('users').where('role', '==', 'technician').get(),
-      adminDb.collection('parts').get(),
-    ]);
+function buildCachedFetcher(storeId: string) {
+  return unstable_cache(
+    async (): Promise<ReportBaseData> => {
+      const storeRef = adminDb.collection('stores').doc(storeId);
 
-    const tickets: ReportTicket[] = ticketsSnap.docs.map((doc) => {
-      const data = doc.data();
-      const machines = Array.isArray(data.machines) ? data.machines : [];
-      const ticketMachines: ReportTicketMachine[] = machines.map((machine: any) => ({
-        machineId: machine.machineId,
-        customerId: machine.customerId,
-        customerName: machine.customerName || 'Unknown',
-        machineType: machine.machineType || 'Unknown',
-        serialNumber: machine.serialNumber || 'Unknown',
-        priority: machine.priority,
+      const [ticketsSnap, workLogsSnap, customersSnap, machinesSnap, techniciansSnap, partsSnap] = await Promise.all([
+        storeRef.collection('tickets').get(),
+        storeRef.collection('machineWorkLogs').get(),
+        storeRef.collection('customers').get(),
+        storeRef.collection('machines').get(),
+        adminDb.collection('users').where('role', '==', 'technician').where('storeId', '==', storeId).get(),
+        storeRef.collection('parts').get(),
+      ]);
+
+      const tickets: ReportTicket[] = ticketsSnap.docs.map((doc) => {
+        const data = doc.data();
+        const machines = Array.isArray(data.machines) ? data.machines : [];
+        const ticketMachines: ReportTicketMachine[] = machines.map((machine: any) => ({
+          machineId: machine.machineId,
+          customerId: machine.customerId,
+          customerName: machine.customerName || 'Unknown',
+          machineType: machine.machineType || 'Unknown',
+          serialNumber: machine.serialNumber || 'Unknown',
+          priority: machine.priority,
+        }));
+
+        const rawScheduleHistory = Array.isArray(data.scheduleHistory) ? data.scheduleHistory : [];
+        const scheduleHistory = rawScheduleHistory
+          .map((entry: any) => {
+            const prevDate = toIsoString(entry.previousDate);
+            const rescheduledAt = toIsoString(entry.rescheduledAt);
+            if (!prevDate || !rescheduledAt) return null;
+            return { previousDate: prevDate, rescheduledAt };
+          })
+          .filter(Boolean) as { previousDate: string; rescheduledAt: string }[];
+
+        return {
+          id: doc.id,
+          ticketNumber: data.ticketNumber || '',
+          status: data.status || 'Open',
+          createdAt: toIsoString(data.createdAt),
+          closedAt: toIsoString(data.closedAt),
+          scheduledVisitDate: toIsoString(data.scheduledVisitDate),
+          assignedTo: data.assignedTo || null,
+          assignedToName: data.assignedToName || null,
+          issueDescription: data.issueDescription || null,
+          machines: ticketMachines,
+          scheduleHistory: scheduleHistory.length > 0 ? scheduleHistory : undefined,
+        };
+      });
+
+      const workLogs: ReportWorkLog[] = workLogsSnap.docs.map((doc) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ticketId: data.ticketId,
+          machineId: data.machineId,
+          recordedBy: data.recordedBy || null,
+          arrivalTime: toIsoString(data.arrivalTime),
+          departureTime: toIsoString(data.departureTime),
+          hoursWorked: typeof data.hoursWorked === 'number' ? data.hoursWorked : null,
+          workPerformed: data.workPerformed || null,
+          outcome: data.outcome || null,
+          repairs: data.repairs || null,
+          partsUsed: Array.isArray(data.partsUsed) ? data.partsUsed : [],
+        };
+      });
+
+      const customers: ReportCustomer[] = customersSnap.docs
+        .filter((doc) => doc.data().isDisabled !== true)
+        .map((doc) => ({
+          id: doc.id,
+          companyName: doc.data().companyName || 'Unknown',
+        }));
+
+      const machines: ReportMachine[] = machinesSnap.docs.map((doc) => ({
+        id: doc.id,
+        customerId: doc.data().customerId,
+        type: doc.data().type || 'Unknown',
+        serialNumber: doc.data().serialNumber || 'Unknown',
       }));
 
-      return {
-        id: doc.id,
-        ticketNumber: data.ticketNumber || '',
-        status: data.status || 'Open',
-        createdAt: toIsoString(data.createdAt),
-        closedAt: toIsoString(data.closedAt),
-        scheduledVisitDate: toIsoString(data.scheduledVisitDate),
-        assignedTo: data.assignedTo || null,
-        assignedToName: data.assignedToName || null,
-        issueDescription: data.issueDescription || null,
-        machines: ticketMachines,
-      };
-    });
+      const technicians: ReportTechnician[] = techniciansSnap.docs
+        .filter((doc) => doc.data().disabled !== true)
+        .map((doc) => ({
+          id: doc.id,
+          name: doc.data().name || 'Unknown',
+        }));
 
-    const workLogs: ReportWorkLog[] = workLogsSnap.docs.map((doc) => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        ticketId: data.ticketId,
-        machineId: data.machineId,
-        recordedBy: data.recordedBy || null,
-        arrivalTime: toIsoString(data.arrivalTime),
-        departureTime: toIsoString(data.departureTime),
-        hoursWorked: typeof data.hoursWorked === 'number' ? data.hoursWorked : null,
-        workPerformed: data.workPerformed || null,
-        outcome: data.outcome || null,
-        repairs: data.repairs || null,
-        partsUsed: Array.isArray(data.partsUsed) ? data.partsUsed : [],
-      };
-    });
-
-    const customers: ReportCustomer[] = customersSnap.docs
-      .filter((doc) => doc.data().isDisabled !== true)
-      .map((doc) => ({
-        id: doc.id,
-        companyName: doc.data().companyName || 'Unknown',
-      }));
-
-    const machines: ReportMachine[] = machinesSnap.docs.map((doc) => ({
-      id: doc.id,
-      customerId: doc.data().customerId,
-      type: doc.data().type || 'Unknown',
-      serialNumber: doc.data().serialNumber || 'Unknown',
-    }));
-
-    const technicians: ReportTechnician[] = techniciansSnap.docs
-      .filter((doc) => doc.data().disabled !== true)
-      .map((doc) => ({
+      const parts: ReportPart[] = partsSnap.docs.map((doc) => ({
         id: doc.id,
         name: doc.data().name || 'Unknown',
+        category: doc.data().category || null,
       }));
 
-    const parts: ReportPart[] = partsSnap.docs.map((doc) => ({
-      id: doc.id,
-      name: doc.data().name || 'Unknown',
-      category: doc.data().category || null,
-    }));
-
-    return { tickets, workLogs, customers, machines, technicians, parts };
-  },
-  ['report-base-data'],
-  {
-    tags: [CACHE_TAGS.REPORTS, CACHE_TAGS.TICKETS, CACHE_TAGS.WORK_LOGS, CACHE_TAGS.CUSTOMERS, CACHE_TAGS.MACHINES, CACHE_TAGS.TECHNICIANS, CACHE_TAGS.PARTS],
-    revalidate: false,
-  },
-);
+      return { tickets, workLogs, customers, machines, technicians, parts };
+    },
+    [`report-base-data-${storeId}`],
+    {
+      tags: [
+        CACHE_TAGS.REPORTS,
+        `${CACHE_TAGS.TICKETS}-${storeId}`,
+        `${CACHE_TAGS.WORK_LOGS}-${storeId}`,
+        `${CACHE_TAGS.CUSTOMERS}-${storeId}`,
+        `${CACHE_TAGS.MACHINES}-${storeId}`,
+        `${CACHE_TAGS.TECHNICIANS}-${storeId}`,
+        `${CACHE_TAGS.PARTS}-${storeId}`,
+      ],
+      revalidate: false,
+    },
+  );
+}
 
 export async function getReportBaseData(): Promise<ReportBaseData> {
   const user = await getCurrentUser();
-  if (!user || !['store_admin', 'super_admin'].includes(user.role)) {
+  if (!user || !['store_admin', 'super_admin'].includes(user.role) || !user.storeId) {
     return { tickets: [], workLogs: [], customers: [], machines: [], technicians: [], parts: [] };
   }
 
-  return getCachedReportBaseData();
+  return buildCachedFetcher(user.storeId)();
 }

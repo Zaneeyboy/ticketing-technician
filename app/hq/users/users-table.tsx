@@ -227,7 +227,7 @@ export default function HQUsersTable({ users, currentUserId, currentUserRole, pe
                   Invite User
                 </Button>
               </DialogTrigger>{' '}
-              <DialogContent className='max-w-md'>
+              <DialogContent className='max-w-md' aria-describedby={undefined}>
                 <DialogHeader>
                   <DialogTitle>Invite User</DialogTitle>
                 </DialogHeader>
@@ -408,7 +408,7 @@ export default function HQUsersTable({ users, currentUserId, currentUserRole, pe
 
       {/* ── Join Link Dialog ─────────────────────────────────────────────── */}
       <Dialog open={joinLinkDialog.open} onOpenChange={(open) => setJoinLinkDialog((p) => ({ ...p, open }))}>
-        <DialogContent className='max-w-md'>
+        <DialogContent className='max-w-md' aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>Invitation link ready</DialogTitle>
           </DialogHeader>

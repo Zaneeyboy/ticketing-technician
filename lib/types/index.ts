@@ -161,8 +161,32 @@ export interface TicketMachine {
   priority: TicketPriority; // Priority for this specific machine
 }
 
+// ── Maintenance Reminder ──────────────────────────────────────────────────────
+// One document per machine, stored at stores/{storeId}/maintenanceReminders/{machineId}.
+// Auto-upserted when a technician logs work with a maintenance recommendation.
+// Drives the schedule page's service reminder calendar events and the create-ticket
+// modal's "due for service" hints.
+export type MaintenanceReminderStatus = 'pending' | 'scheduled' | 'dismissed';
+
+export interface MaintenanceReminder {
+  machineId: string;
+  machineType: string;
+  machineSerialNumber: string;
+  customerId: string;
+  customerName: string;
+  recommendedDate: Date | Timestamp;
+  notes: string;
+  sourceTicketId: string;
+  sourceTicketNumber: string;
+  status: MaintenanceReminderStatus;
+  scheduledTicketId?: string; // set when a follow-up ticket is created for this machine
+  scheduledTicketNumber?: string;
+  createdAt: Date | Timestamp;
+  updatedAt: Date | Timestamp;
+}
+
 // Ticket types
-export type TicketStatus = 'Open' | 'Assigned' | 'In Progress' | 'Pending Parts' | 'Signed Off' | 'Closed';
+export type TicketStatus = 'Open' | 'Assigned' | 'In Progress' | 'Pending Parts' | 'Signoff Required' | 'Signed Off' | 'Closed';
 export type TicketPriority = 'Low' | 'Medium' | 'High' | 'Urgent';
 
 export interface StatusHistoryEntry {
@@ -170,6 +194,14 @@ export interface StatusHistoryEntry {
   changedAt: Date | Timestamp;
   changedByUid: string;
   changedByName: string;
+}
+
+/** Appended each time the scheduledVisitDate is changed, so reports can detect rescheduling. */
+export interface ScheduleChange {
+  previousDate: Date | Timestamp; // The date that was replaced
+  rescheduledAt: Date | Timestamp; // When the change was made
+  rescheduledByUid: string;
+  rescheduledByName: string;
 }
 
 export interface PartUsed {
@@ -266,6 +298,13 @@ export interface Ticket {
 
   // Status audit trail — appended on every status change
   statusHistory?: StatusHistoryEntry[];
+
+  // Schedule audit trail — appended whenever scheduledVisitDate is changed; used for missed-visit reporting
+  scheduleHistory?: ScheduleChange[];
+
+  // Missed visit dates — ISO date strings (YYYY-MM-DD) explicitly marked as missed by the technician.
+  // Auto-detection also applies in reports: scheduled date with no work log = missed.
+  missedVisits?: string[];
 }
 
 // Closure checklist item — each ticket has a set of mandatory steps before closing

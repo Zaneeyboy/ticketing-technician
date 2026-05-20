@@ -1,7 +1,7 @@
-﻿'use client';
+'use client';
 
 import { useCallback, useState, useTransition } from 'react';
-import { Calendar, CalendarRange, CheckCircle2, ChevronDown, Clock, Loader2, ShieldAlert, Wrench } from 'lucide-react';
+import { AlertCircle, Calendar, CalendarRange, CheckCircle2, ChevronDown, Clock, Loader2, ShieldAlert, Wrench } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,10 +9,10 @@ import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ExportButton } from '@/components/export-button';
-import { type ExportColumn } from '@/lib/export';
+import { type ExportColumn, type ExportMetadata } from '@/lib/export';
 import { getServiceReport, type DailyTicketEntry, type PeriodServiceReportData, type TechDayEntry, type TechnicianPeriodRow, type UnassignedDayGroup } from '@/lib/actions/daily-service-report';
 
-// ─── Date Helpers ─────────────────────────────────────────────────────────────
+// --- Date Helpers -------------------------------------------------------------
 
 const toTodayStr = () => new Date().toISOString().slice(0, 10);
 
@@ -84,7 +84,7 @@ const formatTime = (iso: string | null) => {
   return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 };
 
-// ─── Date Range Presets ───────────────────────────────────────────────────────
+// --- Date Range Presets -------------------------------------------------------
 
 interface DatePreset {
   id: string;
@@ -117,96 +117,117 @@ const DATE_PRESETS: DatePreset[] = [
   { id: 'thisyear', label: 'This Year', getRange: () => ({ start: getFirstOfYearStr(), end: toTodayStr() }) },
 ];
 
-// ─── Export Helpers ───────────────────────────────────────────────────────────
+// --- Export Helpers -----------------------------------------------------------
 
+// Columns mirror the Excel format the business already uses.
 const EXPORT_COLUMNS: ExportColumn[] = [
+  { key: 'technicianName', header: 'Technician Name' },
   { key: 'date', header: 'Date' },
-  { key: 'technician', header: 'Technician' },
-  { key: 'ticketNumber', header: 'Ticket #' },
-  { key: 'customer', header: 'Customer' },
-  { key: 'machineType', header: 'Machine Type' },
-  { key: 'serialNumber', header: 'Serial Number' },
-  { key: 'status', header: 'Status' },
-  { key: 'visitType', header: 'Visit Type' },
-  { key: 'priority', header: 'Priority' },
-  { key: 'arrivalTime', header: 'Arrival' },
-  { key: 'departureTime', header: 'Departure' },
-  { key: 'hoursWorked', header: 'Hours' },
-  { key: 'workPerformed', header: 'Work Performed' },
-  { key: 'outcome', header: 'Outcome' },
-  { key: 'partsUsed', header: 'Parts Used' },
+  { key: 'clientName', header: 'Client Name' },
+  { key: 'dailyActivity', header: 'Daily Activity' },
+  { key: 'comments', header: 'Comments' },
+  { key: 'workDescription', header: 'Description of Work Carried Out' },
+  { key: 'partsUsed', header: 'Parts Used/Replaced' },
 ];
+
+function visitActivityLabel(activity: string): string {
+  if (activity === 'visited_scheduled') return 'Customer visited as per schedule';
+  if (activity === 'visited_emergency') return 'Emergency breakdown visit';
+  return 'Customer not visited';
+}
+
+function sortEntries(entries: DailyTicketEntry[]): DailyTicketEntry[] {
+  const order: Record<string, number> = { visited_scheduled: 0, visited_emergency: 1, not_visited: 2 };
+  return [...entries].sort((a, b) => (order[a.visitActivity] ?? 3) - (order[b.visitActivity] ?? 3));
+}
 
 function flattenForExport(data: PeriodServiceReportData) {
   const rows: Record<string, unknown>[] = [];
 
-  const processEntry = (entry: DailyTicketEntry, dateStr: string, techName: string) => {
-    const { ticket, workLogs, visitType } = entry;
-    const topPriority =
-      ticket.machines
-        .map((m) => m.priority)
-        .filter(Boolean)
-        .join(', ') || '';
-    if (workLogs.length === 0) {
-      ticket.machines.forEach((m) => {
-        rows.push({
-          date: formatDateShort(dateStr),
-          technician: techName,
-          ticketNumber: ticket.ticketNumber,
-          customer: m.customerName,
-          machineType: m.machineType,
-          serialNumber: m.serialNumber,
-          status: ticket.status,
-          visitType: visitType.charAt(0).toUpperCase() + visitType.slice(1),
-          priority: topPriority,
-          arrivalTime: '',
-          departureTime: '',
-          hoursWorked: '',
-          workPerformed: ticket.issueDescription,
-          outcome: '',
-          partsUsed: '',
+  const processDay = (techName: string, dateStr: string, entries: DailyTicketEntry[]) => {
+    const sorted = sortEntries(entries);
+
+    for (const entry of sorted) {
+      const { ticket, workLogs, visitActivity } = entry;
+      const activityLabel = visitActivityLabel(visitActivity);
+      const comments = ticket.briefDescription || ticket.issueDescription || '';
+
+      if (workLogs.length === 0) {
+        // No work logged — one row per machine
+        const machines = ticket.machines.length > 0 ? ticket.machines : [{ machineId: '', machineType: '', serialNumber: '', customerName: 'Unknown', priority: undefined }];
+        machines.forEach((m) => {
+          rows.push({
+            technicianName: techName,
+            date: formatDateShort(dateStr),
+            clientName: m.customerName,
+            dailyActivity: activityLabel,
+            comments,
+            workDescription: '',
+            partsUsed: '',
+          });
         });
-      });
-    } else {
-      workLogs.forEach((wl) => {
-        rows.push({
-          date: formatDateShort(dateStr),
-          technician: techName,
-          ticketNumber: ticket.ticketNumber,
-          customer: ticket.machines.find((m) => m.machineId === wl.machineId)?.customerName || '',
-          machineType: wl.machineType,
-          serialNumber: wl.serialNumber,
-          status: ticket.status,
-          visitType: visitType.charAt(0).toUpperCase() + visitType.slice(1),
-          priority: topPriority,
-          arrivalTime: formatTime(wl.arrivalTime) || '',
-          departureTime: formatTime(wl.departureTime) || '',
-          hoursWorked: wl.hoursWorked ?? '',
-          workPerformed: wl.workPerformed || '',
-          outcome: wl.outcome || '',
-          partsUsed: wl.partsUsed.map((p) => `${p.partName} x${p.quantity}`).join(', '),
+      } else {
+        workLogs.forEach((wl) => {
+          const customerName = ticket.machines.find((m) => m.machineId === wl.machineId)?.customerName || ticket.machines[0]?.customerName || '';
+          rows.push({
+            technicianName: techName,
+            date: formatDateShort(dateStr),
+            clientName: customerName,
+            dailyActivity: activityLabel,
+            comments,
+            workDescription: wl.workPerformed || '',
+            partsUsed: wl.partsUsed.map((p) => `${p.partName} x${p.quantity}`).join(', '),
+          });
         });
-      });
+      }
     }
+
+    // Day summary row
+    const visited = entries.filter((e) => e.visitActivity === 'visited_scheduled').length;
+    const emergency = entries.filter((e) => e.visitActivity === 'visited_emergency').length;
+    const missed = entries.filter((e) => e.visitActivity === 'not_visited').length;
+    const totalVisits = visited + emergency;
+    rows.push({
+      technicianName: '',
+      date: '',
+      clientName: '',
+      dailyActivity: `-- Day Summary: Scheduled Visits: ${visited + missed} | Completed: ${visited} | Missed: ${missed} | Emergency: ${emergency} | Total Visits: ${totalVisits}`,
+      comments: '',
+      workDescription: '',
+      partsUsed: '',
+    });
+    rows.push({ technicianName: '', date: '', clientName: '', dailyActivity: '', comments: '', workDescription: '', partsUsed: '' }); // blank spacer
   };
 
   for (const tech of data.technicians) {
     for (const day of tech.days) {
-      for (const entry of day.tickets) {
-        processEntry(entry, day.dateStr, tech.technicianName);
-      }
+      processDay(tech.technicianName, day.dateStr, day.tickets);
     }
   }
   for (const { dateStr, entries } of data.unassignedDays) {
-    for (const entry of entries) {
-      processEntry(entry, dateStr, 'Unassigned');
-    }
+    processDay('Unassigned', dateStr, entries);
   }
 
   return rows;
 }
 
-// ─── Sub-Components ───────────────────────────────────────────────────────────
+function buildExportMetadata(data: PeriodServiceReportData): ExportMetadata {
+  return {
+    title: 'Tech Team Service Report',
+    subtitle: `${formatDateShort(data.startDate)} – ${formatDateShort(data.endDate)}`,
+
+    filters: [
+      { label: 'Period', value: `${formatDateShort(data.startDate)} – ${formatDateShort(data.endDate)}` },
+      { label: 'Calendar Days', value: String(data.calendarDays) },
+      { label: 'Total Planned Visits', value: String(data.totalScheduled) },
+      { label: 'Visits Completed', value: String(data.totalVisited) },
+      { label: 'Visits Missed', value: String(data.totalMissed) },
+      { label: 'Emergency Visits', value: String(data.totalEmergency) },
+    ],
+  };
+}
+
+// --- Sub-Components -----------------------------------------------------------
 
 function StatCard({ label, value, icon: Icon, color }: { label: string; value: number | string; icon: React.ElementType; color: string }) {
   return (
@@ -225,20 +246,33 @@ function StatCard({ label, value, icon: Icon, color }: { label: string; value: n
 }
 
 function TicketCard({ entry, dateStr }: { entry: DailyTicketEntry; dateStr: string }) {
-  const { ticket, workLogs, visitType } = entry;
-  const isEmergency = visitType === 'emergency';
-  const isNotCompleted = ticket.status !== 'Closed';
+  const { ticket, workLogs, visitActivity } = entry;
+  const isEmergency = visitActivity === 'visited_emergency';
+  const isNotVisited = visitActivity === 'not_visited';
   const hasHighPriority = ticket.machines.some((m) => m.priority === 'High' || m.priority === 'Urgent');
 
+  const cardClass = isNotVisited
+    ? 'block rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50/60 dark:bg-amber-950/20 hover:bg-amber-100/60 dark:hover:bg-amber-900/30 transition-colors p-3 sm:p-4 no-underline'
+    : isEmergency
+      ? 'block rounded-lg border border-red-200 dark:border-red-900 bg-red-50/40 dark:bg-red-950/20 hover:bg-red-100/40 dark:hover:bg-red-900/30 transition-colors p-3 sm:p-4 no-underline'
+      : 'block rounded-lg border bg-card hover:bg-muted/40 transition-colors p-3 sm:p-4 no-underline';
+
   return (
-    <a href={`/tickets/${ticket.id}`} target='_blank' rel='noopener noreferrer' className='block rounded-lg border bg-card hover:bg-muted/40 transition-colors p-3 sm:p-4 no-underline'>
+    <a href={`/tickets/${ticket.id}`} target='_blank' rel='noopener noreferrer' className={cardClass}>
       <div className='flex flex-wrap items-start gap-2 mb-2'>
         <span className='font-semibold text-sm text-foreground'>#{ticket.ticketNumber || ticket.id.slice(-6).toUpperCase()}</span>
         {ticket.briefDescription && <span className='text-xs text-muted-foreground truncate'>{ticket.briefDescription}</span>}
         <div className='flex flex-wrap gap-1 ml-auto'>
-          <Badge variant={isEmergency ? 'destructive' : 'secondary'} className='text-[10px] h-4 px-1.5'>
-            {isEmergency ? 'Emergency' : 'Scheduled'}
-          </Badge>
+          {isNotVisited ? (
+            <Badge variant='outline' className='text-[10px] h-4 px-1.5 text-amber-700 dark:text-amber-400 border-amber-400 dark:border-amber-600 font-semibold'>
+              <AlertCircle className='h-2.5 w-2.5 mr-0.5' />
+              Customer Not Visited
+            </Badge>
+          ) : (
+            <Badge variant={isEmergency ? 'destructive' : 'secondary'} className='text-[10px] h-4 px-1.5'>
+              {isEmergency ? 'Emergency' : 'Visited'}
+            </Badge>
+          )}
           {hasHighPriority && (
             <Badge variant='destructive' className='text-[10px] h-4 px-1.5 gap-0.5'>
               <ShieldAlert className='h-2.5 w-2.5' />
@@ -248,11 +282,6 @@ function TicketCard({ entry, dateStr }: { entry: DailyTicketEntry; dateStr: stri
           <Badge variant={ticket.status === 'Closed' ? 'default' : ticket.status === 'Assigned' ? 'secondary' : 'outline'} className='text-[10px] h-4 px-1.5'>
             {ticket.status}
           </Badge>
-          {isNotCompleted && visitType === 'scheduled' && (
-            <Badge variant='outline' className='text-[10px] h-4 px-1.5 text-amber-600 border-amber-400'>
-              Not Completed
-            </Badge>
-          )}
         </div>
       </div>
 
@@ -285,7 +314,7 @@ function TicketCard({ entry, dateStr }: { entry: DailyTicketEntry; dateStr: stri
                 )}
               </div>
               {wl.workPerformed && <p className='text-muted-foreground line-clamp-2'>{wl.workPerformed}</p>}
-              {wl.outcome && <p className='text-muted-foreground italic line-clamp-1'>→ {wl.outcome}</p>}
+              {wl.outcome && <p className='text-muted-foreground italic line-clamp-1'>? {wl.outcome}</p>}
               {wl.partsUsed.length > 0 && <p className='text-muted-foreground'>Parts: {wl.partsUsed.map((p) => `${p.partName} x${p.quantity}`).join(', ')}</p>}
             </div>
           ))}
@@ -296,25 +325,36 @@ function TicketCard({ entry, dateStr }: { entry: DailyTicketEntry; dateStr: stri
 }
 
 function DaySection({ day }: { day: TechDayEntry }) {
+  const totalPlanned = day.visitedScheduledCount + day.missedCount;
+  const totalVisits = day.visitedScheduledCount + day.emergencyCount;
+  const sorted = sortEntries(day.tickets);
+
   return (
     <div>
       <div className='flex flex-wrap items-center gap-2 mb-3'>
         <p className='text-sm font-semibold'>{formatDayLabel(day.dateStr)}</p>
         <div className='flex gap-1 flex-wrap'>
-          {day.scheduledCount > 0 && (
-            <span className='text-[10px] bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded-full font-medium'>{day.scheduledCount} scheduled</span>
+          {day.visitedScheduledCount > 0 && (
+            <span className='text-[10px] bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded-full font-medium'>{day.visitedScheduledCount} visited</span>
           )}
           {day.emergencyCount > 0 && (
             <span className='text-[10px] bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 px-1.5 py-0.5 rounded-full font-medium'>{day.emergencyCount} emergency</span>
           )}
-          {day.notCompletedCount > 0 && (
-            <span className='text-[10px] bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded-full font-medium'>{day.notCompletedCount} incomplete</span>
+          {day.missedCount > 0 && (
+            <span className='text-[10px] bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 px-1.5 py-0.5 rounded-full font-medium'>{day.missedCount} missed</span>
           )}
-          {day.hoursLogged > 0 && <span className='text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full font-medium'>{day.hoursLogged.toFixed(1)}h</span>}
+          {totalPlanned > 0 && (
+            <span className='text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full font-medium'>
+              {totalVisits}/{totalPlanned} planned
+            </span>
+          )}
+          {day.hoursLogged > 0 && (
+            <span className='text-[10px] bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded-full font-medium'>{day.hoursLogged.toFixed(2)}h</span>
+          )}
         </div>
       </div>
       <div className='space-y-2'>
-        {day.tickets.map((entry) => (
+        {sorted.map((entry) => (
           <TicketCard key={`${entry.ticket.id}-${day.dateStr}`} entry={entry} dateStr={day.dateStr} />
         ))}
       </div>
@@ -361,7 +401,7 @@ function TechnicianSection({ row }: { row: TechnicianPeriodRow }) {
                 {row.totalHours > 0 && (
                   <>
                     <span className='opacity-40'>&middot;</span>
-                    <span>{row.totalHours.toFixed(1)}h logged</span>
+                    <span>{row.totalHours.toFixed(2)}h logged</span>
                   </>
                 )}
               </div>
@@ -478,12 +518,12 @@ function SummaryTable({ data }: { data: PeriodServiceReportData }) {
             <TableHeader>
               <TableRow>
                 <TableHead>Technician</TableHead>
-                <TableHead className='text-center'>Scheduled</TableHead>
-                <TableHead className='text-center'>Not Completed</TableHead>
+                <TableHead className='text-center'>Planned</TableHead>
+                <TableHead className='text-center'>Completed</TableHead>
+                <TableHead className='text-center'>Missed</TableHead>
                 <TableHead className='text-center'>Emergency</TableHead>
-                <TableHead className='text-center'>Tickets</TableHead>
+                <TableHead className='text-center'>Total Visits</TableHead>
                 <TableHead className='text-center'>Active Days</TableHead>
-                <TableHead className='text-center'>Avg/Day</TableHead>
                 <TableHead className='text-right'>Hours</TableHead>
               </TableRow>
             </TableHeader>
@@ -493,17 +533,15 @@ function SummaryTable({ data }: { data: PeriodServiceReportData }) {
                   <TableCell className='font-medium'>{tech.technicianName}</TableCell>
                   <TableCell className='text-center'>{tech.totalScheduled}</TableCell>
                   <TableCell className='text-center'>
-                    {tech.totalNotCompleted > 0 ? (
-                      <span className='text-amber-600 dark:text-amber-400 font-medium'>{tech.totalNotCompleted}</span>
-                    ) : (
-                      <span className='text-green-600 dark:text-green-400'>0</span>
-                    )}
+                    <span className={tech.totalVisited === tech.totalScheduled ? 'text-green-600 dark:text-green-400' : ''}>{tech.totalVisited}</span>
+                  </TableCell>
+                  <TableCell className='text-center'>
+                    {tech.totalMissed > 0 ? <span className='text-amber-600 dark:text-amber-400 font-medium'>{tech.totalMissed}</span> : <span className='text-green-600 dark:text-green-400'>0</span>}
                   </TableCell>
                   <TableCell className='text-center'>{tech.totalEmergency > 0 ? <span className='text-red-600 dark:text-red-400 font-medium'>{tech.totalEmergency}</span> : '0'}</TableCell>
-                  <TableCell className='text-center'>{tech.totalTickets}</TableCell>
+                  <TableCell className='text-center font-medium'>{tech.totalVisited + tech.totalEmergency}</TableCell>
                   <TableCell className='text-center'>{tech.activeDaysCount}</TableCell>
-                  <TableCell className='text-center text-muted-foreground'>{tech.avgScheduledPerDay}</TableCell>
-                  <TableCell className='text-right font-medium'>{tech.totalHours.toFixed(1)}h</TableCell>
+                  <TableCell className='text-right font-medium'>{tech.totalHours.toFixed(2)}h</TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -530,7 +568,7 @@ function ReportSkeleton() {
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// --- Main Component -----------------------------------------------------------
 
 export function DailyServiceReport() {
   const [startDate, setStartDate] = useState(toFirstOfMonthStr());
@@ -566,6 +604,7 @@ export function DailyServiceReport() {
   const exportData = reportData ? flattenForExport(reportData) : [];
   const exportFilename = reportData ? `tech-service-report-${reportData.startDate}-to-${reportData.endDate}` : 'tech-service-report';
   const exportSubtitle = reportData ? `${formatDateShort(reportData.startDate)} – ${formatDateShort(reportData.endDate)}` : '';
+  const exportMetadata = reportData ? buildExportMetadata(reportData) : undefined;
 
   const isEmpty = reportData !== null && reportData.technicians.length === 0 && reportData.unassignedDays.length === 0;
 
@@ -636,7 +675,15 @@ export function DailyServiceReport() {
             </div>
 
             {reportData && !isEmpty && (
-              <ExportButton data={exportData} columns={EXPORT_COLUMNS} filename={exportFilename} sheetName='Service Report' title='Tech Team Service Report' subtitle={exportSubtitle} />
+              <ExportButton
+                data={exportData}
+                columns={EXPORT_COLUMNS}
+                filename={exportFilename}
+                sheetName='Service Report'
+                title='Tech Team Service Report'
+                subtitle={exportSubtitle}
+                metadata={exportMetadata}
+              />
             )}
           </div>
 
@@ -685,11 +732,12 @@ export function DailyServiceReport() {
 
           <div className={`space-y-4 transition-opacity duration-200 ${isPending ? 'opacity-40' : 'opacity-100'}`}>
             {/* Summary stat cards */}
-            <div className='grid grid-cols-2 lg:grid-cols-4 gap-4'>
-              <StatCard label='Scheduled Visits' value={reportData.totalScheduled} icon={Calendar} color='bg-primary/10 text-primary' />
+            <div className='grid grid-cols-2 lg:grid-cols-5 gap-4'>
+              <StatCard label='Planned Visits' value={reportData.totalScheduled} icon={Calendar} color='bg-primary/10 text-primary' />
+              <StatCard label='Completed' value={reportData.totalVisited} icon={CheckCircle2} color='bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' />
+              <StatCard label='Missed Visits' value={reportData.totalMissed} icon={AlertCircle} color='bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400' />
               <StatCard label='Emergency Visits' value={reportData.totalEmergency} icon={ShieldAlert} color='bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' />
-              <StatCard label='Total Tickets' value={reportData.totalTickets} icon={Wrench} color='bg-muted text-muted-foreground' />
-              <StatCard label='Hours Logged' value={`${reportData.totalHours.toFixed(1)}h`} icon={Clock} color='bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' />
+              <StatCard label='Hours Logged' value={`${reportData.totalHours.toFixed(2)}h`} icon={Clock} color='bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400' />
             </div>
 
             {/* Summary table */}

@@ -60,7 +60,7 @@ export async function getMachineTypes(): Promise<string[]> {
 export async function addMachineType(type: string): Promise<{ success: boolean; error?: string }> {
   try {
     const user = await getCurrentUser();
-    if (!user?.storeId || !['super_admin', 'store_admin'].includes(user.role)) {
+    if (!user?.storeId || !['super_admin', 'store_admin', 'call_admin'].includes(user.role)) {
       return { success: false, error: 'Unauthorized' };
     }
 
@@ -121,7 +121,7 @@ export async function getMachines(): Promise<Machine[]> {
 export async function createMachine(data: any) {
   try {
     const user = await getCurrentUser();
-    if (!user?.storeId || !['super_admin', 'store_admin'].includes(user.role)) {
+    if (!user?.storeId || !['super_admin', 'store_admin', 'call_admin'].includes(user.role)) {
       return { success: false, error: 'Unauthorized' };
     }
 
@@ -157,7 +157,7 @@ export async function createMachine(data: any) {
 export async function updateMachine(machineId: string, data: any) {
   try {
     const user = await getCurrentUser();
-    if (!user?.storeId || !['super_admin', 'store_admin'].includes(user.role)) {
+    if (!user?.storeId || !['super_admin', 'store_admin', 'call_admin'].includes(user.role)) {
       return { success: false, error: 'Unauthorized' };
     }
 
@@ -183,7 +183,7 @@ export async function updateMachine(machineId: string, data: any) {
 export async function deleteMachine(machineId: string) {
   try {
     const user = await getCurrentUser();
-    if (!user?.storeId || !['super_admin', 'store_admin'].includes(user.role)) {
+    if (!user?.storeId || !['super_admin', 'store_admin', 'call_admin'].includes(user.role)) {
       return { success: false, error: 'Unauthorized' };
     }
 
@@ -219,7 +219,7 @@ export interface BulkMachineImportResult {
 export async function bulkCreateMachines(rows: BulkMachineRow[]): Promise<BulkMachineImportResult> {
   try {
     const user = await getCurrentUser();
-    if (!user?.storeId || !['super_admin', 'store_admin'].includes(user.role)) {
+    if (!user?.storeId || !['super_admin', 'store_admin', 'call_admin'].includes(user.role)) {
       return { success: false, created: 0, skipped: [], errors: [], error: 'Unauthorized' };
     }
     if (!Array.isArray(rows) || rows.length === 0) {
@@ -414,7 +414,7 @@ export async function getHQMachines(): Promise<{ success: boolean; rows: HQMachi
 export async function setMachineAssociatedParts(machineId: string, parts: Array<{ partId?: string; partName: string; addedAt: Date }>): Promise<{ success: boolean; error?: string }> {
   try {
     const user = await getCurrentUser();
-    if (!user?.storeId || !['super_admin', 'store_admin'].includes(user.role)) {
+    if (!user?.storeId || !['super_admin', 'store_admin', 'call_admin'].includes(user.role)) {
       return { success: false, error: 'Unauthorized' };
     }
 

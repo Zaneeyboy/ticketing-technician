@@ -292,6 +292,8 @@ export default function DashboardPage() {
         return 'bg-amber-500/15 text-amber-700 dark:text-amber-400';
       case 'Assigned':
         return 'bg-primary/10 text-primary dark:bg-primary/15';
+      case 'Signoff Required':
+        return 'bg-violet-500/15 text-violet-700 dark:text-violet-400';
       case 'Signed Off':
         return 'bg-violet-500/15 text-violet-700 dark:text-violet-400';
       case 'Closed':

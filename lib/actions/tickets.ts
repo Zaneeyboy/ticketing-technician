@@ -159,6 +159,26 @@ export async function createTicket(data: any) {
 
     const docRef = await storeCol(storeId, 'tickets').add(ticketData);
 
+    // Non-blocking: mark pending maintenance reminders for these machines as 'scheduled'
+    // so the schedule page and modal know a follow-up has been booked.
+    const machineIds = (validated.machines ?? []).map((m: any) => m.machineId).filter(Boolean);
+    if (machineIds.length > 0) {
+      Promise.all(
+        machineIds.map(async (mId: string) => {
+          const reminderRef = storeCol(storeId, 'maintenanceReminders').doc(mId);
+          const snap = await reminderRef.get();
+          if (snap.exists && snap.data()?.status === 'pending') {
+            await reminderRef.update({
+              status: 'scheduled',
+              scheduledTicketId: docRef.id,
+              scheduledTicketNumber: ticketNumber,
+              updatedAt: Timestamp.now(),
+            });
+          }
+        }),
+      ).catch((e) => console.error('linkMaintenanceReminders failed:', e));
+    }
+
     // One-time auto-activate: promote store from 'onboarding' → 'active' on first ticket
     const storeDoc = await adminDb.collection('stores').doc(storeId).get();
     if (storeDoc.exists && storeDoc.data()?.status === 'onboarding') {
@@ -249,10 +269,35 @@ export async function updateTicket(ticketId: string, data: any) {
     };
 
     if (validated.scheduledVisitDate !== undefined) {
-      if (validated.scheduledVisitDate === null) {
+      const oldScheduledDate = currentTicketData?.scheduledVisitDate;
+      const newScheduledDate = validated.scheduledVisitDate;
+
+      if (newScheduledDate === null) {
         updateData.scheduledVisitDate = null;
-      } else if (validated.scheduledVisitDate instanceof Date) {
-        updateData.scheduledVisitDate = Timestamp.fromDate(validated.scheduledVisitDate);
+      } else if (newScheduledDate instanceof Date) {
+        updateData.scheduledVisitDate = Timestamp.fromDate(newScheduledDate);
+      }
+
+      // If there was a previous date and it's different from the new one, record the change
+      const hadPreviousDate = oldScheduledDate != null;
+      const dateActuallyChanged =
+        hadPreviousDate &&
+        (() => {
+          const oldMs =
+            oldScheduledDate instanceof Timestamp ? oldScheduledDate.toMillis() : (oldScheduledDate as any)?.seconds != null ? oldScheduledDate.seconds * 1000 : new Date(oldScheduledDate).getTime();
+          const newMs = newScheduledDate instanceof Date ? newScheduledDate.getTime() : null;
+          if (newMs === null) return true; // clearing the date
+          return Math.abs(oldMs - newMs) > 60_000; // > 1 min difference to avoid trivial diffs
+        })();
+
+      if (dateActuallyChanged) {
+        const { FieldValue } = await import('firebase-admin/firestore');
+        updateData.scheduleHistory = FieldValue.arrayUnion({
+          previousDate: oldScheduledDate, // already a Timestamp from Firestore
+          rescheduledAt: Timestamp.now(),
+          rescheduledByUid: user.uid,
+          rescheduledByName: user.name,
+        });
       }
     }
 
@@ -344,6 +389,10 @@ export async function addWorkLogEntry(ticketId: string, machineId: string, data:
         ...validated.maintenanceRecommendation,
         date: Timestamp.fromDate(validated.maintenanceRecommendation.date),
       };
+      // Denormalized top-level field for efficient schedule page queries
+      updateData.maintenanceDate = Timestamp.fromDate(validated.maintenanceRecommendation.date);
+    } else {
+      updateData.maintenanceDate = null;
     }
 
     if (workLogsQuery.empty) {
@@ -357,6 +406,26 @@ export async function addWorkLogEntry(ticketId: string, machineId: string, data:
       });
     } else {
       await workLogsQuery.docs[0].ref.update(updateData);
+    }
+
+    // Upsert maintenanceReminders — one document per machine, keyed by machineId
+    if (validated.maintenanceRecommendation?.date) {
+      await storeCol(storeId, 'maintenanceReminders')
+        .doc(machineId)
+        .set({
+          machineId,
+          machineType: ticketMachine.machineType,
+          machineSerialNumber: ticketMachine.serialNumber,
+          customerId: ticketMachine.customerId,
+          customerName: ticketMachine.customerName,
+          recommendedDate: Timestamp.fromDate(validated.maintenanceRecommendation.date),
+          notes: validated.maintenanceRecommendation.notes || '',
+          sourceTicketId: ticketId,
+          sourceTicketNumber: ticketData?.ticketNumber ?? '',
+          status: 'pending',
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        });
     }
 
     await revalidateCache([CACHE_TAGS.WORK_LOGS, CACHE_TAGS.REPORTS, `${CACHE_TAGS.WORK_LOGS}-${ticketId}`]);
@@ -431,6 +500,10 @@ export async function addBulkWorkLogEntries(ticketId: string, data: any) {
           ...(rec.date ? { date: Timestamp.fromDate(rec.date) } : {}),
           notes: rec.notes || '',
         };
+        // Denormalized top-level field for efficient schedule page queries
+        workLogData.maintenanceDate = rec.date ? Timestamp.fromDate(rec.date) : null;
+      } else {
+        workLogData.maintenanceDate = null;
       }
 
       if (workLogsQuery.empty) {
@@ -445,6 +518,25 @@ export async function addBulkWorkLogEntries(ticketId: string, data: any) {
         });
       } else {
         batch.update(workLogsQuery.docs[0].ref, workLogData);
+      }
+
+      // Upsert maintenanceReminders within the same batch — one document per machine
+      if (rec?.date) {
+        const reminderRef = storeCol(storeId, 'maintenanceReminders').doc(machineLog.machineId);
+        batch.set(reminderRef, {
+          machineId: machineLog.machineId,
+          machineType: ticketMachine.machineType,
+          machineSerialNumber: ticketMachine.serialNumber,
+          customerId: ticketMachine.customerId,
+          customerName: ticketMachine.customerName,
+          recommendedDate: Timestamp.fromDate(rec.date),
+          notes: rec.notes || '',
+          sourceTicketId: ticketId,
+          sourceTicketNumber: ticketData?.ticketNumber ?? '',
+          status: 'pending',
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        });
       }
 
       processedCount++;
@@ -751,7 +843,7 @@ export async function generateSignOffToken(ticketId: string): Promise<{ success:
     const storeId = user.storeId;
     const ticketDoc = await storeCol(storeId, 'tickets').doc(ticketId).get();
     if (!ticketDoc.exists) return { success: false, error: 'Ticket not found' };
-    if (ticketDoc.data()?.status === 'Closed') return { success: false, error: 'Ticket is already closed' };
+    if (['Closed', 'Signed Off'].includes(ticketDoc.data()?.status)) return { success: false, error: 'Ticket is already closed' };
 
     const { randomUUID } = await import('crypto');
     const token = randomUUID();
@@ -780,16 +872,29 @@ export async function generateSignOffToken(ticketId: string): Promise<{ success:
       superseded: false,
     });
 
-    // Write link metadata to the ticket document
+    const { FieldValue } = await import('firebase-admin/firestore');
+
+    // Set ticket to 'Signoff Required' — work is done, awaiting customer sign-off.
+    // Status advances to 'Closed' once the customer submits the sign-off form.
     await storeCol(storeId, 'tickets')
       .doc(ticketId)
       .update({
+        status: 'Signoff Required',
         signOffLink: { token, createdAt: nowTs, expiresAt: expiresTs },
         updatedAt: nowTs,
+        statusHistory: FieldValue.arrayUnion({
+          status: 'Signoff Required',
+          changedAt: nowTs,
+          changedByUid: user.uid,
+          changedByName: user.name,
+          note: 'Sign-off link sent to customer — awaiting signature',
+        }),
       });
 
-    await revalidateCache([`${CACHE_TAGS.TICKETS}-${storeId}`, CACHE_TAGS.TICKETS]);
+    await revalidateCache([`${CACHE_TAGS.TICKETS}-${storeId}`, CACHE_TAGS.TICKETS, CACHE_TAGS.REPORTS]);
+    revalidatePath('/tickets');
     revalidatePath(`/tickets/${ticketId}`);
+    revalidatePath('/dashboard');
 
     return { success: true, token };
   } catch (error: any) {
@@ -812,7 +917,7 @@ export async function adminForceCloseTicket(ticketId: string): Promise<{ success
     const storeId = user.storeId;
     const ticketDoc = await storeCol(storeId, 'tickets').doc(ticketId).get();
     if (!ticketDoc.exists) return { success: false, error: 'Ticket not found' };
-    if (ticketDoc.data()?.status === 'Closed') return { success: false, error: 'Ticket is already closed' };
+    if (['Closed', 'Signed Off'].includes(ticketDoc.data()?.status)) return { success: false, error: 'Ticket is already closed' };
 
     const { FieldValue } = await import('firebase-admin/firestore');
     const now = Timestamp.now();
@@ -843,5 +948,321 @@ export async function adminForceCloseTicket(ticketId: string): Promise<{ success
   } catch (error: any) {
     console.error('Error force closing ticket:', error);
     return { success: false, error: error.message || 'Failed to close ticket' };
+  }
+}
+
+// ── getMachineWorkHistory ──────────────────────────────────────────────────────
+// Returns all work logs for a specific machine across all tickets, ordered by
+// most recent first. Used by technicians to review a machine's service history
+// before performing new work.
+
+export interface MachineWorkHistoryEntry {
+  id: string;
+  ticketId: string;
+  ticketNumber: string;
+  machineId: string;
+  machineType: string;
+  machineSerialNumber: string;
+  arrivalTime: Date | null;
+  departureTime: Date | null;
+  hoursWorked: number | null;
+  workPerformed: string;
+  outcome: string;
+  repairs: string;
+  partsUsed: Array<{ partId?: string; partName: string; quantity: number }>;
+  maintenanceRecommendation: { date: Date | null; notes: string } | null;
+  createdAt: Date | null;
+}
+
+export async function getMachineWorkHistory(machineId: string): Promise<{ success: boolean; history?: MachineWorkHistoryEntry[]; error?: string }> {
+  try {
+    const user = await getCurrentUser();
+    if (!user?.storeId) return { success: false, error: 'Unauthorized' };
+
+    // Fetch all work logs for this machine in this store
+    const logsSnap = await storeCol(user.storeId, 'machineWorkLogs').where('machineId', '==', machineId).orderBy('createdAt', 'desc').limit(25).get();
+
+    if (logsSnap.empty) return { success: true, history: [] };
+
+    // Gather ticket IDs to resolve ticket numbers
+    const ticketIds: string[] = Array.from(new Set<string>(logsSnap.docs.map((d) => d.data().ticketId as string)));
+    const ticketNumberMap: Record<string, string> = {};
+    for (let i = 0; i < ticketIds.length; i += 30) {
+      const chunk = ticketIds.slice(i, i + 30);
+      await Promise.all(
+        chunk.map(async (tid) => {
+          const tdoc = await storeCol(user.storeId!, 'tickets').doc(tid).get();
+          if (tdoc.exists) ticketNumberMap[tid] = tdoc.data()?.ticketNumber ?? tid;
+        }),
+      );
+    }
+
+    const history: MachineWorkHistoryEntry[] = logsSnap.docs.map((doc) => {
+      const d = doc.data();
+      return {
+        id: doc.id,
+        ticketId: d.ticketId,
+        ticketNumber: ticketNumberMap[d.ticketId] ?? d.ticketId,
+        machineId: d.machineId,
+        machineType: d.machineType ?? '',
+        machineSerialNumber: d.machineSerialNumber ?? '',
+        arrivalTime: d.arrivalTime?.toDate() ?? null,
+        departureTime: d.departureTime?.toDate() ?? null,
+        hoursWorked: d.hoursWorked ?? null,
+        workPerformed: d.workPerformed ?? '',
+        outcome: d.outcome ?? '',
+        repairs: d.repairs ?? '',
+        partsUsed: d.partsUsed ?? [],
+        maintenanceRecommendation: d.maintenanceRecommendation ? { date: d.maintenanceRecommendation.date?.toDate() ?? null, notes: d.maintenanceRecommendation.notes ?? '' } : null,
+        createdAt: d.createdAt?.toDate() ?? null,
+      };
+    });
+
+    return { success: true, history };
+  } catch (error: any) {
+    console.error('getMachineWorkHistory error:', error);
+    return { success: false, error: error.message || 'Failed to load machine history' };
+  }
+}
+
+// ── getTechnicianWeekSchedule ─────────────────────────────────────────────────
+// Returns a technician's scheduled tickets for the next N days (default 7).
+// Used in the create-ticket modal so call admins can check availability.
+
+export interface TechScheduleEntry {
+  id: string;
+  ticketNumber: string;
+  scheduledVisitDate: Date;
+  customerName: string;
+  machineTypes: string[];
+  status: string;
+}
+
+export async function getTechnicianWeekSchedule(technicianId: string, daysAhead = 7): Promise<{ success: boolean; entries?: TechScheduleEntry[]; error?: string }> {
+  try {
+    const user = await getCurrentUser();
+    if (!user?.storeId || !['super_admin', 'store_admin', 'store_manager', 'call_admin'].includes(user.role)) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const end = new Date(now);
+    end.setDate(now.getDate() + daysAhead);
+    end.setHours(23, 59, 59, 999);
+
+    const nowTs = Timestamp.fromDate(now);
+    const endTs = Timestamp.fromDate(end);
+
+    // Query by assignedTo only (single-field index — always available).
+    // Filtering by scheduledVisitDate range + orderBy on the same field would require a
+    // composite index; instead we filter and sort in memory to avoid that dependency.
+    const snap = await storeCol(user.storeId, 'tickets').where('assignedTo', '==', technicianId).get();
+
+    const entries: TechScheduleEntry[] = snap.docs
+      .filter((doc) => {
+        const svd = doc.data().scheduledVisitDate;
+        if (!svd) return false;
+        const st = doc.data().status ?? '';
+        if (['Closed', 'Signed Off', 'Signoff Required'].includes(st)) return false;
+        return svd >= nowTs && svd <= endTs;
+      })
+      .map((doc) => {
+        const d = doc.data();
+        return {
+          id: doc.id,
+          ticketNumber: d.ticketNumber ?? '',
+          scheduledVisitDate: d.scheduledVisitDate.toDate(),
+          customerName: d.machines?.[0]?.customerName ?? 'Unknown',
+          machineTypes: (d.machines ?? []).map((m: any) => m.machineType).filter(Boolean),
+          status: d.status ?? '',
+        };
+      })
+      .sort((a, b) => a.scheduledVisitDate.getTime() - b.scheduledVisitDate.getTime());
+
+    return { success: true, entries };
+  } catch (error: any) {
+    console.error('getTechnicianWeekSchedule error:', error);
+    return { success: false, error: error.message || 'Failed to load technician schedule' };
+  }
+}
+
+// ── getTechAvailabilityForDate ────────────────────────────────────────────────
+// Returns how many active tickets each technician has on a given date (YYYY-MM-DD).
+// Used to auto-show availability badges next to each technician when a scheduled
+// date is selected in the create-ticket modal.
+
+export interface TechDayLoad {
+  techId: string;
+  scheduledCount: number;
+}
+
+export async function getTechAvailabilityForDate(dateStr: string): Promise<{ success: boolean; loads?: TechDayLoad[]; error?: string }> {
+  try {
+    const user = await getCurrentUser();
+    if (!user?.storeId || !['super_admin', 'store_admin', 'store_manager', 'call_admin'].includes(user.role)) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    const [year, month, day] = dateStr.split('-').map(Number);
+    const startOfDay = new Date(year, month - 1, day, 0, 0, 0, 0);
+    const endOfDay = new Date(year, month - 1, day, 23, 59, 59, 999);
+
+    // Single-field range query on scheduledVisitDate — no composite index needed.
+    const snap = await storeCol(user.storeId, 'tickets').where('scheduledVisitDate', '>=', Timestamp.fromDate(startOfDay)).where('scheduledVisitDate', '<=', Timestamp.fromDate(endOfDay)).get();
+
+    const countByTech = new Map<string, number>();
+    for (const doc of snap.docs) {
+      const data = doc.data();
+      if (!data.assignedTo) continue;
+      if (['Closed', 'Signed Off', 'Signoff Required'].includes(data.status ?? '')) continue;
+      countByTech.set(data.assignedTo, (countByTech.get(data.assignedTo) ?? 0) + 1);
+    }
+
+    const loads: TechDayLoad[] = Array.from(countByTech.entries()).map(([techId, scheduledCount]) => ({ techId, scheduledCount }));
+    return { success: true, loads };
+  } catch (error: any) {
+    console.error('getTechAvailabilityForDate error:', error);
+    return { success: false, error: error.message || 'Failed to check availability' };
+  }
+}
+
+// ── getMaintenanceRemindersForCustomer ────────────────────────────────────────
+// Returns all pending maintenance reminders for a customer's machines.
+// Used in the create-ticket modal so call admins can see which machines are due
+// for service when selecting a customer, and pre-prioritize their ticket.
+
+export interface CustomerMaintenanceReminder {
+  machineId: string;
+  machineType: string;
+  machineSerialNumber: string;
+  recommendedDate: Date;
+  notes: string;
+  sourceTicketId: string;
+  sourceTicketNumber: string;
+}
+
+export async function getMaintenanceRemindersForCustomer(customerId: string): Promise<{ success: boolean; reminders?: CustomerMaintenanceReminder[]; error?: string }> {
+  try {
+    const user = await getCurrentUser();
+    if (!user?.storeId) return { success: false, error: 'Unauthorized' };
+
+    const snap = await storeCol(user.storeId, 'maintenanceReminders').where('customerId', '==', customerId).where('status', '==', 'pending').get();
+
+    const reminders: CustomerMaintenanceReminder[] = snap.docs.map((doc) => {
+      const d = doc.data();
+      return {
+        machineId: d.machineId,
+        machineType: d.machineType ?? '',
+        machineSerialNumber: d.machineSerialNumber ?? '',
+        recommendedDate: d.recommendedDate.toDate(),
+        notes: d.notes ?? '',
+        sourceTicketId: d.sourceTicketId ?? '',
+        sourceTicketNumber: d.sourceTicketNumber ?? '',
+      };
+    });
+
+    return { success: true, reminders };
+  } catch (error: any) {
+    console.error('getMaintenanceRemindersForCustomer error:', error);
+    return { success: false, error: error.message || 'Failed to load maintenance reminders' };
+  }
+}
+
+// ── getUpcomingMaintenanceReminders ─────────────────────────────────────────
+// Returns all pending maintenance reminders from today onwards for the current
+// user's store. Used by the schedule page to avoid a client-side Firestore
+// query that requires a composite index and is subject to security-rule checks.
+// Uses the Admin SDK so it bypasses both rules and index requirements.
+
+export interface UpcomingMaintenanceReminder {
+  id: string;
+  ticketId: string;
+  ticketNumber: string;
+  machineId: string;
+  machineType: string;
+  machineSerialNumber: string;
+  customerName: string;
+  date: string; // ISO string — serializable across server/client boundary
+  notes: string;
+}
+
+export async function getUpcomingMaintenanceReminders(): Promise<{ success: boolean; reminders: UpcomingMaintenanceReminder[]; error?: string }> {
+  try {
+    const user = await getCurrentUser();
+    if (!user?.storeId) return { success: false, reminders: [], error: 'Unauthorized' };
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const snap = await storeCol(user.storeId, 'maintenanceReminders')
+      .where('status', '==', 'pending')
+      .where('recommendedDate', '>=', Timestamp.fromDate(today))
+      .orderBy('recommendedDate', 'asc')
+      .get();
+
+    const reminders: UpcomingMaintenanceReminder[] = snap.docs.map((doc) => {
+      const d = doc.data();
+      return {
+        id: doc.id,
+        ticketId: d.sourceTicketId ?? '',
+        ticketNumber: d.sourceTicketNumber ?? '',
+        machineId: d.machineId ?? '',
+        machineType: d.machineType ?? '',
+        machineSerialNumber: d.machineSerialNumber ?? '',
+        customerName: d.customerName ?? 'Unknown Customer',
+        date: d.recommendedDate.toDate().toISOString(),
+        notes: d.notes ?? '',
+      };
+    });
+
+    return { success: true, reminders };
+  } catch (error: any) {
+    console.error('getUpcomingMaintenanceReminders error:', error);
+    return { success: false, reminders: [], error: error.message || 'Failed to load maintenance reminders' };
+  }
+}
+
+// ── markVisitMissed ───────────────────────────────────────────────────────────
+// Records an explicit missed visit for a specific date on a ticket.
+// Both technicians (for their own tickets) and admins can call this.
+// The daily-service-report also auto-detects missed visits, but explicit marking
+// provides a definitive record even before the report is generated.
+
+export async function markVisitMissed(ticketId: string, dateStr: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const user = await getCurrentUser();
+    if (!user?.storeId || !['technician', 'store_admin', 'store_manager', 'call_admin', 'super_admin'].includes(user.role)) {
+      return { success: false, error: 'Unauthorized' };
+    }
+
+    const storeId = user.storeId;
+    const ticketRef = storeCol(storeId, 'tickets').doc(ticketId);
+    const ticketSnap = await ticketRef.get();
+    if (!ticketSnap.exists) return { success: false, error: 'Ticket not found' };
+
+    // Technicians can only mark their own assigned tickets
+    const ticketData = ticketSnap.data()!;
+    if (user.role === 'technician' && ticketData.assignedTo !== user.uid) {
+      return { success: false, error: 'This ticket is not assigned to you' };
+    }
+
+    const existingMissed: string[] = Array.isArray(ticketData.missedVisits) ? (ticketData.missedVisits as string[]) : [];
+    if (existingMissed.includes(dateStr)) return { success: true }; // already marked
+
+    const { FieldValue } = await import('firebase-admin/firestore');
+    await ticketRef.update({
+      missedVisits: FieldValue.arrayUnion(dateStr),
+      updatedAt: Timestamp.now(),
+    });
+
+    await revalidateCache([`${CACHE_TAGS.TICKETS}-${storeId}`, CACHE_TAGS.TICKETS, CACHE_TAGS.REPORTS]);
+    revalidatePath('/tickets');
+    revalidatePath(`/tickets/${ticketId}`);
+
+    return { success: true };
+  } catch (error: any) {
+    console.error('markVisitMissed error:', error);
+    return { success: false, error: error.message || 'Failed to mark visit as missed' };
   }
 }

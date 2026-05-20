@@ -10,14 +10,14 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, orderBy, getDocs, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase/client';
 import { Ticket } from '@/lib/types';
-import { Calendar, List, Clock, MapPin, Wrench, ChevronLeft, ChevronRight, X, Eye, CalendarDays, Users } from 'lucide-react';
+import { Calendar, List, Clock, MapPin, Wrench, ChevronLeft, ChevronRight, X, Eye, CalendarDays, Users, BellRing, Plus } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { getCustomers } from '@/lib/actions/customers';
-import { getTechniciansForAssignment } from '@/lib/actions/tickets';
+import { getTechniciansForAssignment, getUpcomingMaintenanceReminders } from '@/lib/actions/tickets';
 import { DateRangeExportButton } from '@/components/export-button';
 
 interface ScheduledVisit extends Ticket {
@@ -30,11 +30,29 @@ interface ScheduledVisit extends Ticket {
   };
 }
 
+interface ServiceReminder {
+  id: string; // work log doc ID
+  ticketId: string;
+  ticketNumber: string;
+  machineId: string;
+  machineType: string;
+  machineSerialNumber: string;
+  customerName: string;
+  date: Date; // maintenanceRecommendation.date
+  notes: string;
+}
+
 const PRIORITY_CFG: Record<string, { bar: string; chip: string; dot: string }> = {
   Urgent: { bar: 'bg-red-500', chip: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300', dot: 'bg-red-500' },
   High: { bar: 'bg-orange-500', chip: 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300', dot: 'bg-orange-500' },
   Medium: { bar: 'bg-yellow-400', chip: 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300', dot: 'bg-yellow-400' },
   Low: { bar: 'bg-emerald-500', chip: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300', dot: 'bg-emerald-500' },
+};
+
+const REMINDER_CFG = {
+  bar: 'bg-violet-500',
+  chip: 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300',
+  dot: 'bg-violet-500',
 };
 
 function topPriority(visit: ScheduledVisit): string {
@@ -63,6 +81,7 @@ export default function SchedulePage() {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const [scheduledVisits, setScheduledVisits] = useState<ScheduledVisit[]>([]);
+  const [serviceReminders, setServiceReminders] = useState<ServiceReminder[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
@@ -78,6 +97,8 @@ export default function SchedulePage() {
   // Determine user role capabilities early
   const isCallAdmin = user?.role === 'call_admin';
   const canSeeAllSchedules = user?.role ? ['admin', 'management', 'call_admin', 'store_admin', 'store_manager', 'super_admin'].includes(user.role) : false;
+  // Technicians also see recommended service reminders (machine health context for their visits)
+  const canSeeReminders = user?.role ? ['admin', 'management', 'call_admin', 'store_admin', 'store_manager', 'super_admin', 'technician'].includes(user.role) : false;
 
   useEffect(() => {
     if (authLoading) return;
@@ -109,12 +130,24 @@ export default function SchedulePage() {
 
       const ticketsRef = collection(db, 'stores', user.storeId, 'tickets');
 
-      // Admins see all scheduled visits; technicians only see their own
+      // Terminal statuses — exclude from schedule
+      const TERMINAL_STATUSES = new Set(['Closed', 'Signed Off', 'Signoff Required']);
+
+      // Query by scheduledVisitDate range so we only pull tickets that actually
+      // have a date. For technicians, also filter by assignedTo using the
+      // existing composite index (assignedTo + scheduledVisitDate).
+      // Status filtering is done in JS to avoid needing a third composite index.
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+      const cutoff = Timestamp.fromDate(sixMonthsAgo);
+
       let q;
       if (canSeeAllSchedules) {
-        q = query(ticketsRef, where('status', 'in', ['Open', 'Assigned']));
+        // Single-field range on scheduledVisitDate — uses auto-created index
+        q = query(ticketsRef, where('scheduledVisitDate', '>=', cutoff), orderBy('scheduledVisitDate', 'asc'));
       } else {
-        q = query(ticketsRef, where('assignedTo', '==', user.uid), where('status', 'in', ['Open', 'Assigned']));
+        // Uses existing composite index: assignedTo (ASC) + scheduledVisitDate (ASC)
+        q = query(ticketsRef, where('assignedTo', '==', user.uid), where('scheduledVisitDate', '>=', cutoff), orderBy('scheduledVisitDate', 'asc'));
       }
 
       const snapshot = await getDocs(q);
@@ -123,39 +156,58 @@ export default function SchedulePage() {
       for (const doc of snapshot.docs) {
         const ticketData = { id: doc.id, ...(doc.data() as Record<string, any>) } as Ticket;
 
-        // Only include tickets with scheduled visit dates
-        if (ticketData.scheduledVisitDate) {
-          const scheduledDate = ticketData.scheduledVisitDate instanceof Date ? ticketData.scheduledVisitDate : (ticketData.scheduledVisitDate as any).toDate();
+        // Skip terminal statuses — only show active scheduled work
+        if (TERMINAL_STATUSES.has(ticketData.status)) continue;
 
-          // Get customer info from first machine using the customer map
-          const customerId = ticketData.machines[0]?.customerId;
-          let customerInfo;
+        const scheduledDate = ticketData.scheduledVisitDate instanceof Date ? ticketData.scheduledVisitDate : (ticketData.scheduledVisitDate as any).toDate();
 
-          if (customerId) {
-            const customer = customerMap.get(customerId);
-            if (customer) {
-              customerInfo = {
-                companyName: customer.companyName,
-                contactPerson: customer.contactPerson,
-                phone: customer.phone,
-                address: customer.address,
-              };
-            }
+        // Get customer info from first machine using the customer map
+        const customerId = ticketData.machines?.[0]?.customerId;
+        let customerInfo;
+
+        if (customerId) {
+          const customer = customerMap.get(customerId);
+          if (customer) {
+            customerInfo = {
+              companyName: customer.companyName,
+              contactPerson: customer.contactPerson,
+              phone: customer.phone,
+              address: customer.address,
+            };
           }
-
-          visits.push({
-            ...ticketData,
-            scheduledVisitDate: scheduledDate,
-            customerInfo,
-          });
         }
+
+        visits.push({
+          ...ticketData,
+          scheduledVisitDate: scheduledDate,
+          customerInfo,
+        });
       }
 
-      // Sort by scheduled date
-      visits.sort((a, b) => a.scheduledVisitDate.getTime() - b.scheduledVisitDate.getTime());
-
+      // Already sorted by Firestore (scheduledVisitDate asc)
       console.log(`[Schedule] Loaded ${visits.length} scheduled visits`);
       setScheduledVisits(visits);
+
+      // ── Load maintenance reminders via server action ──────────────────────
+      // Using a server action (Admin SDK) avoids client-side Firestore security
+      // rule checks and composite index requirements entirely.
+      if (canSeeReminders) {
+        try {
+          const result = await getUpcomingMaintenanceReminders();
+          if (result.success) {
+            setServiceReminders(
+              result.reminders.map((r) => ({
+                ...r,
+                date: new Date(r.date),
+              })),
+            );
+          } else {
+            console.error('[Schedule] Failed to load maintenance reminders:', result.error);
+          }
+        } catch (reminderErr) {
+          console.error('[Schedule] Error loading maintenance reminders:', reminderErr);
+        }
+      }
     } catch (error) {
       console.error('[Schedule] Error loading scheduled visits:', error);
     } finally {
@@ -179,6 +231,10 @@ export default function SchedulePage() {
       const visitDate = new Date(visit.scheduledVisitDate);
       return visitDate.getDate() === date.getDate() && visitDate.getMonth() === date.getMonth() && visitDate.getFullYear() === date.getFullYear();
     });
+  };
+
+  const getRemindersForDate = (date: Date) => {
+    return serviceReminders.filter((r) => r.date.getDate() === date.getDate() && r.date.getMonth() === date.getMonth() && r.date.getFullYear() === date.getFullYear());
   };
 
   // Get unique customers for filter
@@ -291,6 +347,7 @@ export default function SchedulePage() {
   for (let day = 1; day <= daysInMonth; day++) {
     const date = new Date(year, month, day);
     const visitsForDay = getVisitsForDate(date);
+    const remindersForDay = getRemindersForDate(date);
     const isToday = _today.toDateString() === date.toDateString();
     const dow = date.getDay();
 
@@ -308,20 +365,25 @@ export default function SchedulePage() {
         >
           {day}
         </div>
-        {visitsForDay.length > 0 && (
+        {(visitsForDay.length > 0 || remindersForDay.length > 0) && (
           <>
             {/* Mobile: colored dots only */}
             <div className='sm:hidden flex flex-wrap gap-0.5'>
-              {visitsForDay.slice(0, 4).map((visit) => {
+              {visitsForDay.slice(0, 3).map((visit) => {
                 const p = topPriority(visit);
                 const cfg = PRIORITY_CFG[p] ?? PRIORITY_CFG.Low;
                 return <span key={visit.id} className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />;
               })}
-              {visitsForDay.length > 4 && <span className='text-[8px] leading-none text-muted-foreground self-center'>+{visitsForDay.length - 4}</span>}
+              {remindersForDay.slice(0, 2).map((r) => (
+                <span key={r.id} className={`w-1.5 h-1.5 rounded-full ${REMINDER_CFG.dot}`} />
+              ))}
+              {visitsForDay.length + remindersForDay.length > 5 && (
+                <span className='text-[8px] leading-none text-muted-foreground self-center'>+{visitsForDay.length + remindersForDay.length - 5}</span>
+              )}
             </div>
             {/* Desktop: full text chips */}
             <div className='hidden sm:block space-y-0.5'>
-              {visitsForDay.slice(0, 3).map((visit) => {
+              {visitsForDay.slice(0, 2).map((visit) => {
                 const p = topPriority(visit);
                 const cfg = PRIORITY_CFG[p] ?? PRIORITY_CFG.Low;
                 return (
@@ -339,7 +401,13 @@ export default function SchedulePage() {
                   </div>
                 );
               })}
-              {visitsForDay.length > 3 && <div className='text-xs text-muted-foreground px-1'>+{visitsForDay.length - 3} more</div>}
+              {remindersForDay.slice(0, 1).map((r) => (
+                <div key={r.id} className={`text-xs px-1.5 py-0.5 rounded flex items-center gap-1 truncate ${REMINDER_CFG.chip}`} title={`Recommended service · ${r.customerName}`}>
+                  <BellRing className={`shrink-0 w-2.5 h-2.5`} />
+                  <span className='truncate'>Rec. · {r.customerName}</span>
+                </div>
+              ))}
+              {visitsForDay.length + remindersForDay.length > 3 && <div className='text-xs text-muted-foreground px-1'>+{visitsForDay.length + remindersForDay.length - 3} more</div>}
             </div>
           </>
         )}
@@ -413,6 +481,49 @@ export default function SchedulePage() {
       </div>
     );
   };
+
+  // ── Recommended service reminder card ───────────────────────────────────────
+  const ReminderCard = ({ reminder }: { reminder: ServiceReminder }) => (
+    <div className='relative bg-card border border-violet-200 dark:border-violet-800/60 rounded-xl overflow-hidden transition-all hover:shadow-md hover:-translate-y-px'>
+      <div className={`absolute left-0 inset-y-0 w-1 ${REMINDER_CFG.bar}`} />
+      <div className='pl-4 pr-4 py-3 space-y-2'>
+        <div className='flex items-start justify-between gap-2'>
+          <div className='flex items-start gap-2.5 min-w-0'>
+            <div className='shrink-0 w-8 h-8 rounded-full bg-violet-500/10 flex items-center justify-center'>
+              <BellRing className='h-4 w-4 text-violet-600 dark:text-violet-400' />
+            </div>
+            <div className='min-w-0'>
+              <div className='flex items-center gap-1.5 flex-wrap'>
+                <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${REMINDER_CFG.chip}`}>Recommended Service</span>
+                <span className='font-mono text-xs text-muted-foreground'>via {reminder.ticketNumber}</span>
+              </div>
+              <p className='font-semibold text-sm mt-0.5 truncate'>{reminder.customerName}</p>
+              <p className='text-xs text-muted-foreground truncate'>
+                {reminder.machineType}
+                {reminder.machineSerialNumber ? ` · S/N: ${reminder.machineSerialNumber}` : ''}
+              </p>
+            </div>
+          </div>
+          <div className='shrink-0 text-xs text-violet-600 dark:text-violet-400 font-medium whitespace-nowrap'>{reminder.date.toLocaleDateString('en-TT', { month: 'short', day: 'numeric' })}</div>
+        </div>
+        {reminder.notes && <p className='text-xs text-muted-foreground line-clamp-2 italic'>"{reminder.notes}"</p>}
+        <div className='flex justify-end pt-0.5'>
+          <Button
+            variant='outline'
+            size='sm'
+            className='h-7 text-xs gap-1 border-violet-300 text-violet-700 hover:bg-violet-50 dark:border-violet-700 dark:text-violet-400 dark:hover:bg-violet-950'
+            onClick={() => {
+              router.push(`/tickets/new?customerId=${reminder.machineId}`);
+              setIsDateModalOpen(false);
+            }}
+          >
+            <Plus className='h-3 w-3' />
+            Book Service Ticket
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <DashboardLayout>
@@ -609,12 +720,38 @@ export default function SchedulePage() {
                 </div>
                 <div className='grid grid-cols-7 divide-x divide-y divide-border/70'>{calendarDays}</div>
               </div>
-              {filteredVisits.length === 0 && (
+              {filteredVisits.length === 0 && serviceReminders.length === 0 && (
                 <div className='text-center py-10 text-muted-foreground mt-4'>
                   <CalendarDays className='h-10 w-10 mx-auto mb-2 opacity-20' />
                   <p>No scheduled visits found.</p>
                 </div>
               )}
+
+              {/* Color legend */}
+              <div className='mt-4 p-3 rounded-lg border border-border bg-muted/30'>
+                <p className='text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2'>Color key</p>
+                <div className='flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground'>
+                  <span className='font-medium text-foreground/70 self-center'>Visit priority:</span>
+                  <span className='flex items-center gap-1.5'>
+                    <span className='w-2.5 h-2.5 rounded-full bg-red-500 shrink-0' /> Urgent
+                  </span>
+                  <span className='flex items-center gap-1.5'>
+                    <span className='w-2.5 h-2.5 rounded-full bg-orange-500 shrink-0' /> High
+                  </span>
+                  <span className='flex items-center gap-1.5'>
+                    <span className='w-2.5 h-2.5 rounded-full bg-yellow-400 shrink-0' /> Medium
+                  </span>
+                  <span className='flex items-center gap-1.5'>
+                    <span className='w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0' /> Low
+                  </span>
+                  {canSeeReminders && (
+                    <span className='flex items-center gap-1.5 border-l border-border pl-4 ml-1'>
+                      <BellRing className='w-3 h-3 text-violet-500 shrink-0' />
+                      <span className='text-violet-600 dark:text-violet-400 font-medium'>Recommended service</span>
+                    </span>
+                  )}
+                </div>
+              </div>
             </TabsContent>
 
             {/* ── Timeline tab ───────────────────────────────────────────────── */}
@@ -629,6 +766,32 @@ export default function SchedulePage() {
                 )}
               </div>
 
+              {/* Color legend */}
+              <div className='mb-4 p-3 rounded-lg border border-border bg-muted/30'>
+                <p className='text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2'>Color key</p>
+                <div className='flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground'>
+                  <span className='font-medium text-foreground/70 self-center'>Visit priority:</span>
+                  <span className='flex items-center gap-1.5'>
+                    <span className='w-2.5 h-2.5 rounded-full bg-red-500 shrink-0' /> Urgent
+                  </span>
+                  <span className='flex items-center gap-1.5'>
+                    <span className='w-2.5 h-2.5 rounded-full bg-orange-500 shrink-0' /> High
+                  </span>
+                  <span className='flex items-center gap-1.5'>
+                    <span className='w-2.5 h-2.5 rounded-full bg-yellow-400 shrink-0' /> Medium
+                  </span>
+                  <span className='flex items-center gap-1.5'>
+                    <span className='w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0' /> Low
+                  </span>
+                  {canSeeReminders && (
+                    <span className='flex items-center gap-1.5 border-l border-border pl-4 ml-1'>
+                      <BellRing className='w-3 h-3 text-violet-500 shrink-0' />
+                      <span className='text-violet-600 dark:text-violet-400 font-medium'>Recommended service</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+
               {visitsByDay.length === 0 ? (
                 <div className='text-center py-16 text-muted-foreground'>
                   <CalendarDays className='h-12 w-12 mx-auto mb-3 opacity-20' />
@@ -639,6 +802,7 @@ export default function SchedulePage() {
                 <div>
                   {visitsByDay.map(({ date, visits }, groupIdx) => {
                     const isDateToday = sameDay(date, _today);
+                    const dayReminders = getRemindersForDate(date);
                     return (
                       <div key={date.toDateString()} className={groupIdx > 0 ? 'mt-7' : ''}>
                         <div className='flex items-center gap-3 mb-3'>
@@ -653,6 +817,7 @@ export default function SchedulePage() {
                             </p>
                             <p className='text-xs text-muted-foreground'>
                               {visits.length} {visits.length === 1 ? 'visit' : 'visits'} scheduled
+                              {dayReminders.length > 0 && ` · ${dayReminders.length} recommended service`}
                             </p>
                           </div>
                           <div className='flex-1 h-px bg-border' />
@@ -660,6 +825,9 @@ export default function SchedulePage() {
                         <div className='ml-14 space-y-2'>
                           {visits.map((visit) => (
                             <VisitCard key={visit.id} visit={visit} />
+                          ))}
+                          {dayReminders.map((r) => (
+                            <ReminderCard key={r.id} reminder={r} />
                           ))}
                         </div>
                       </div>
@@ -683,13 +851,23 @@ export default function SchedulePage() {
             <DialogDescription className='sr-only'>Scheduled visits for the selected date</DialogDescription>
           </DialogHeader>
           <div className='space-y-3 mt-2'>
-            {selectedDate && getVisitsForDate(selectedDate).length === 0 ? (
+            {selectedDate && getVisitsForDate(selectedDate).length === 0 && getRemindersForDate(selectedDate).length === 0 ? (
               <div className='text-center py-8 text-muted-foreground'>
                 <Calendar className='h-8 w-8 mx-auto mb-2 opacity-30' />
                 <p>No scheduled visits for this date</p>
               </div>
             ) : (
-              selectedDate && getVisitsForDate(selectedDate).map((visit) => <VisitCard key={visit.id} visit={visit} />)
+              <>
+                {selectedDate && getVisitsForDate(selectedDate).map((visit) => <VisitCard key={visit.id} visit={visit} />)}
+                {selectedDate && getRemindersForDate(selectedDate).length > 0 && (
+                  <div className='space-y-2'>
+                    {getVisitsForDate(selectedDate!).length > 0 && <p className='text-xs font-semibold text-violet-600 dark:text-violet-400 uppercase tracking-wide mt-3'>Recommended Service</p>}
+                    {getRemindersForDate(selectedDate).map((r) => (
+                      <ReminderCard key={r.id} reminder={r} />
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </DialogContent>

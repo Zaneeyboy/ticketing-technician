@@ -28,20 +28,28 @@ const CUSTOMER_EXPORT_COLUMNS: ExportColumn[] = [
   { header: 'Parts Used', key: 'partsUsed' },
 ];
 
-const DEFAULT_FILTERS: ReportFiltersState = {
+const thisMonthStart = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+};
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
+const getDefaultFilters = (): ReportFiltersState => ({
   statuses: [],
   technicianIds: [],
   customerIds: [],
   partNames: [],
   partCategories: [],
-};
+  startDate: thisMonthStart(),
+  endDate: todayStr(),
+});
 
 const getFilterDate = (value?: string) => (value ? new Date(`${value}T00:00:00`) : null);
 const getFilterEndDate = (value?: string) => (value ? new Date(`${value}T23:59:59`) : null);
 
 export function TimeByCustomerReport() {
   const data = useReportData();
-  const [filters, setFilters] = useState<ReportFiltersState>(DEFAULT_FILTERS);
+  const [filters, setFilters] = useState<ReportFiltersState>(getDefaultFilters);
 
   const partsCategoryMap = useMemo(() => new Map(data.parts.map((part) => [part.name, part.category || ''])), [data.parts]);
   const ticketMap = useMemo(() => new Map(data.tickets.map((ticket) => [ticket.id, ticket])), [data.tickets]);
@@ -226,7 +234,7 @@ export function TimeByCustomerReport() {
         />
       </div>
 
-      <ReportFilters filters={filters} onChange={setFilters} onResetAll={() => setFilters(DEFAULT_FILTERS)} technicians={data.technicians} customers={data.customers} parts={data.parts} />
+      <ReportFilters filters={filters} onChange={setFilters} onResetAll={() => setFilters(getDefaultFilters())} technicians={data.technicians} customers={data.customers} parts={data.parts} />
 
       <div className='grid gap-4 md:grid-cols-2 lg:grid-cols-4'>
         <Card>
@@ -242,7 +250,7 @@ export function TimeByCustomerReport() {
             <CardTitle className='text-sm text-muted-foreground'>Total Hours</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className='text-2xl font-semibold'>{totalHours.toFixed(1)}h</div>
+            <div className='text-2xl font-semibold'>{totalHours.toFixed(2)}h</div>
           </CardContent>
         </Card>
         <Card>
@@ -250,7 +258,7 @@ export function TimeByCustomerReport() {
             <CardTitle className='text-sm text-muted-foreground'>Avg Hours/Customer</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className='text-2xl font-semibold'>{rows.length > 0 ? (totalHours / rows.length).toFixed(1) : '0.0'}h</div>
+            <div className='text-2xl font-semibold'>{rows.length > 0 ? (totalHours / rows.length).toFixed(2) : '0.0'}h</div>
           </CardContent>
         </Card>
         <Card>
@@ -261,7 +269,7 @@ export function TimeByCustomerReport() {
             <div className='text-2xl font-semibold'>
               {(() => {
                 const totalTickets = rows.reduce((sum, row) => sum + row.ticketIds.size, 0);
-                return totalTickets > 0 ? (totalHours / totalTickets).toFixed(1) : '0.0';
+                return totalTickets > 0 ? (totalHours / totalTickets).toFixed(2) : '0.0';
               })()}
               h
             </div>
@@ -327,12 +335,12 @@ export function TimeByCustomerReport() {
                         <TableCell className='font-medium'>{row.customerName}</TableCell>
                         <TableCell className='text-right'>
                           <Badge variant='outline' className='bg-secondary/10 dark:bg-secondary/20 text-secondary border-secondary/30'>
-                            {row.totalHours.toFixed(1)}h
+                            {row.totalHours.toFixed(2)}h
                           </Badge>
                         </TableCell>
                         <TableCell className='text-right'>{row.ticketIds.size}</TableCell>
                         <TableCell className='text-right'>
-                          <span className='text-muted-foreground'>{avgHoursPerTicket.toFixed(1)}h</span>
+                          <span className='text-muted-foreground'>{avgHoursPerTicket.toFixed(2)}h</span>
                         </TableCell>
                         <TableCell className='text-right'>{row.machineIds.size}</TableCell>
                         <TableCell className='text-right'>
@@ -370,7 +378,7 @@ export function TimeByCustomerReport() {
                                 <div className='grid grid-cols-2 md:grid-cols-4 gap-3 p-4 bg-muted/50 rounded-lg'>
                                   <div>
                                     <div className='text-xs text-muted-foreground'>Total Hours</div>
-                                    <div className='text-lg font-semibold'>{row.totalHours.toFixed(1)}h</div>
+                                    <div className='text-lg font-semibold'>{row.totalHours.toFixed(2)}h</div>
                                   </div>
                                   <div>
                                     <div className='text-xs text-muted-foreground'>Tickets</div>
@@ -378,7 +386,7 @@ export function TimeByCustomerReport() {
                                   </div>
                                   <div>
                                     <div className='text-xs text-muted-foreground'>Avg Hrs/Ticket</div>
-                                    <div className='text-lg font-semibold'>{avgHoursPerTicket.toFixed(1)}h</div>
+                                    <div className='text-lg font-semibold'>{avgHoursPerTicket.toFixed(2)}h</div>
                                   </div>
                                   <div>
                                     <div className='text-xs text-muted-foreground'>Machines</div>
@@ -395,7 +403,7 @@ export function TimeByCustomerReport() {
                                       <div key={tech.technicianId} className='flex items-center justify-between p-2 rounded-md border bg-card'>
                                         <span className='text-sm font-medium'>{tech.technicianName}</span>
                                         <Badge className='bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'>
-                                          {tech.hours.toFixed(1)}h
+                                          {tech.hours.toFixed(2)}h
                                         </Badge>
                                       </div>
                                     ))}
@@ -444,7 +452,7 @@ export function TimeByCustomerReport() {
                                                   <TableCell className='text-sm'>{log.technicianName}</TableCell>
                                                   <TableCell className='text-right'>
                                                     <Badge variant='outline' className='text-xs'>
-                                                      {log.hoursWorked?.toFixed(1) || '0.0'}h
+                                                      {log.hoursWorked?.toFixed(2) || '0.0'}h
                                                     </Badge>
                                                   </TableCell>
                                                   <TableCell className='text-sm'>{machineLabel}</TableCell>
@@ -559,7 +567,7 @@ export function TimeByCustomerReport() {
                                               </TableRow>
                                             )}
                                             {pageData.map((tech) => {
-                                              const percentage = row.totalHours > 0 ? ((tech.hours / row.totalHours) * 100).toFixed(1) : '0.0';
+                                              const percentage = row.totalHours > 0 ? ((tech.hours / row.totalHours) * 100).toFixed(2) : '0.0';
                                               return (
                                                 <TableRow key={tech.technicianId} className='hover:bg-muted/50'>
                                                   <TableCell className='font-medium'>{tech.technicianName}</TableCell>
@@ -568,7 +576,7 @@ export function TimeByCustomerReport() {
                                                       variant='outline'
                                                       className='text-xs bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
                                                     >
-                                                      {tech.hours.toFixed(1)}h
+                                                      {tech.hours.toFixed(2)}h
                                                     </Badge>
                                                   </TableCell>
                                                   <TableCell className='text-right'>

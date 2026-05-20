@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "seed": "tsx scripts/seed-test-data.ts",
+    "seed:excel": "tsx scripts/generate-seed-excel.ts",
     "wipe": "tsx scripts/wipe-database.ts",
     "reseed": "tsx scripts/wipe-database.ts && tsx scripts/seed-test-data.ts",
     "migrate:dry": "tsx scripts/migrate-to-multitenant.ts --dry-run",

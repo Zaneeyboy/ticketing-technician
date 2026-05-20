@@ -140,7 +140,7 @@ function MachineFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>{editingMachine ? 'Edit Machine' : 'Add New Machine'}</DialogTitle>
         </DialogHeader>
@@ -508,11 +508,7 @@ export default function MachinesPage() {
               </TooltipTrigger>
               <TooltipContent>View machine</TooltipContent>
             </Tooltip>
-            {user?.role !== 'call_admin' && user?.role !== 'store_manager' && (
-              <>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant='ghost' size='sm' onClick={() => handleEdit(row.original)} className='h-8 w-8 p-0'>
+            {user?.role !== 'store_manager' && (
                       <Edit2 className='h-4 w-4' />
                     </Button>
                   </TooltipTrigger>
@@ -578,9 +574,7 @@ export default function MachinesPage() {
                 sheetName='Machines'
                 title='Machines Inventory'
               />
-              {user?.role !== 'call_admin' && user?.role !== 'store_manager' && (
-                <>
-                  <Button variant='outline' size='sm' onClick={downloadTemplate} className='gap-2'>
+              {user?.role !== 'store_manager' && (
                     <Download className='h-4 w-4' />
                     Template
                   </Button>
@@ -740,7 +734,7 @@ export default function MachinesPage() {
 
       {/* View Dialog */}
       <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
-        <DialogContent>
+        <DialogContent aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>Machine Details</DialogTitle>
           </DialogHeader>

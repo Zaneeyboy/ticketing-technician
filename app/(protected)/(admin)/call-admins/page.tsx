@@ -24,12 +24,16 @@ interface CallAdminSummary {
 }
 
 export default async function CallAdminsPage() {
-  await requireRole(['store_admin']);
+  const currentUser = await requireRole(['store_admin', 'super_admin']);
 
   const loadData = async (): Promise<CallAdminSummary[]> => {
     try {
-      // Get all call_admin users using admin SDK with their aggregated stats
-      const callAdminDocs = await adminDb.collection('users').where('role', '==', 'call_admin').get();
+      // Build query — super_admin sees all stores, store_admin only sees their own store
+      let callAdminsQuery = adminDb.collection('users').where('role', '==', 'call_admin');
+      if (currentUser.role === 'store_admin' && currentUser.storeId) {
+        callAdminsQuery = callAdminsQuery.where('storeId', '==', currentUser.storeId) as any;
+      }
+      const callAdminDocs = await callAdminsQuery.get();
 
       // Map user documents to summaries using aggregated stats
       const summaries: CallAdminSummary[] = callAdminDocs.docs.map((doc) => {

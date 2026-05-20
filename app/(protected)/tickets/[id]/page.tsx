@@ -14,11 +14,11 @@ import { collection, doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase/client';
 import { Ticket, StatusHistoryEntry } from '@/lib/types';
 import { getWorkLogsForTicket, WorkLogEntry } from '@/lib/actions/work-logs';
-import { closeTicket, adminForceCloseTicket, generateSignOffToken } from '@/lib/actions/tickets';
+import { closeTicket, adminForceCloseTicket, generateSignOffToken, markVisitMissed } from '@/lib/actions/tickets';
 import { EditTicketModal } from '../edit-ticket-modal';
 import { LogWorkModal } from '../log-work-modal';
 import { formatDate } from '@/lib/utils';
-import { ArrowLeft, Calendar, User, Wrench, Clock, CheckCircle2, AlertTriangle, ClipboardList, ChevronRight, Package, XCircle, Link2, RefreshCw, ShieldCheck, PenSquare } from 'lucide-react';
+import { ArrowLeft, Calendar, User, Wrench, Clock, CheckCircle2, AlertTriangle, ClipboardList, ChevronRight, Package, XCircle, Link2, RefreshCw, ShieldCheck, PenSquare, MapPin } from 'lucide-react';
 import { showToast } from '@/lib/toast';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -26,6 +26,7 @@ import { showToast } from '@/lib/toast';
 const STATUS_COLORS: Record<string, string> = {
   Open: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200',
   Assigned: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+  'Signoff Required': 'bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-200',
   'Signed Off': 'bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-200',
   Closed: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
 };
@@ -114,9 +115,17 @@ export default function TicketDetailPage() {
   const isAdmin = user?.role && ['super_admin', 'store_admin', 'store_manager', 'call_admin'].includes(user.role);
   const isTechnician = user?.role === 'technician';
   const isAssignedTech = isTechnician && ticket?.assignedTo === user?.uid;
-  const canEdit = isAdmin && ticket?.status !== 'Closed' && ticket?.status !== 'Signed Off';
-  const canLogWork = isAssignedTech && ticket?.status !== 'Closed' && ticket?.status !== 'Signed Off';
+  const canEdit = isAdmin && ticket?.status !== 'Closed' && ticket?.status !== 'Signed Off' && ticket?.status !== 'Signoff Required';
+  const canLogWork = isAssignedTech && ticket?.status !== 'Closed' && ticket?.status !== 'Signed Off' && ticket?.status !== 'Signoff Required';
   const canClose = isAdmin && ticket?.status !== 'Closed';
+
+  // Mark Missed
+  const scheduledDateRaw = ticket?.scheduledVisitDate ? (ticket.scheduledVisitDate instanceof Date ? ticket.scheduledVisitDate : ((ticket.scheduledVisitDate as any).toDate?.() ?? null)) : null;
+  const scheduledDateStr = scheduledDateRaw ? scheduledDateRaw.toISOString().slice(0, 10) : null;
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const isPastScheduled = scheduledDateStr !== null && scheduledDateStr < todayStr;
+  const alreadyMissed = Array.isArray((ticket as any)?.missedVisits) && (ticket as any).missedVisits.includes(scheduledDateStr);
+  const canMarkMissed = isAssignedTech && ticket?.status !== 'Closed' && ticket?.status !== 'Signed Off' && ticket?.status !== 'Signoff Required' && isPastScheduled && !alreadyMissed;
 
   const handleCloseTicket = async () => {
     if (!ticket) return;
@@ -209,6 +218,24 @@ export default function TicketDetailPage() {
             <StatusBadge status={ticket.status} />
           </div>
           <div className='flex items-center gap-2'>
+            {canMarkMissed && (
+              <Button
+                variant='outline'
+                size='sm'
+                className='gap-2 border-amber-300 text-amber-600 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-950/30'
+                onClick={async () => {
+                  const res = await markVisitMissed(ticket!.id, scheduledDateStr!);
+                  if (res.success) {
+                    showToast.success('Visit marked as missed');
+                    loadTicket();
+                  } else {
+                    showToast.error(res.error || 'Failed to mark missed');
+                  }
+                }}
+              >
+                <MapPin className='h-4 w-4' /> Mark Missed
+              </Button>
+            )}
             {canLogWork && (
               <Button variant='outline' size='sm' onClick={() => setLogWorkOpen(true)} className='gap-2'>
                 <Wrench className='h-4 w-4' /> Log Work

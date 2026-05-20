@@ -82,7 +82,10 @@ export default function TechniciansPage() {
   const loadTechnicianData = async () => {
     try {
       setLoading(true);
-      const techSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'technician')));
+
+      // super_admin sees all technicians; store_admin sees only their store's
+      const techConstraints = user!.role === 'store_admin' && user!.storeId ? [where('role', '==', 'technician'), where('storeId', '==', user!.storeId)] : [where('role', '==', 'technician')];
+      const techSnap = await getDocs(query(collection(db, 'users'), ...techConstraints));
       const tickets = await getStoreTickets();
 
       const techniciansMap = new Map<string, TechnicianRow>();
@@ -425,7 +428,7 @@ export default function TechniciansPage() {
 
       {/* Technician Details Dialog */}
       <Dialog open={ticketDialogOpen} onOpenChange={setTicketDialogOpen}>
-        <DialogContent className='max-w-[95vw] sm:max-w-2xl lg:max-w-4xl max-h-[90vh] overflow-y-auto'>
+        <DialogContent className='max-w-[95vw] sm:max-w-2xl lg:max-w-4xl max-h-[90vh] overflow-y-auto' aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>{selectedTechnician?.name} - Assigned Tickets</DialogTitle>
           </DialogHeader>
@@ -610,7 +613,7 @@ export default function TechniciansPage() {
 
       {/* Ticket Detail Dialog */}
       <Dialog open={ticketDetailDialogOpen} onOpenChange={setTicketDetailDialogOpen}>
-        <DialogContent className='max-w-[95vw] sm:max-w-2xl lg:max-w-4xl max-h-[95vh] overflow-y-auto'>
+        <DialogContent className='max-w-[95vw] sm:max-w-2xl lg:max-w-4xl max-h-[95vh] overflow-y-auto' aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>{selectedTicket?.ticketNumber} - Ticket Details</DialogTitle>
           </DialogHeader>

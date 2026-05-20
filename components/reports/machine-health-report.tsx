@@ -29,20 +29,28 @@ const MACHINE_EXPORT_COLUMNS: ExportColumn[] = [
   { header: 'Ticket #s', key: 'ticketNumbers' },
 ];
 
-const DEFAULT_FILTERS: ReportFiltersState = {
+const thisMonthStart = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+};
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
+const getDefaultFilters = (): ReportFiltersState => ({
   statuses: [],
   technicianIds: [],
   customerIds: [],
   partNames: [],
   partCategories: [],
-};
+  startDate: thisMonthStart(),
+  endDate: todayStr(),
+});
 
 const getFilterDate = (value?: string) => (value ? new Date(`${value}T00:00:00`) : null);
 const getFilterEndDate = (value?: string) => (value ? new Date(`${value}T23:59:59`) : null);
 
 export function MachineHealthReport() {
   const data = useReportData();
-  const [filters, setFilters] = useState<ReportFiltersState>(DEFAULT_FILTERS);
+  const [filters, setFilters] = useState<ReportFiltersState>(getDefaultFilters);
   const [ticketThreshold, setTicketThreshold] = useState(5);
 
   const partsCategoryMap = useMemo(() => new Map(data.parts.map((part) => [part.name, part.category || ''])), [data.parts]);
@@ -250,7 +258,7 @@ export function MachineHealthReport() {
         healthStatus: row.status,
         totalTickets: row.ticketCount,
         repeatIssues: row.repeatIssueCount,
-        totalHours: row.totalHours.toFixed(1),
+        totalHours: row.totalHours.toFixed(2),
         partsUsed: Array.from(row.partsUsed.entries())
           .map(([name, qty]) => `${name} ×${qty}`)
           .join(', '),
@@ -308,7 +316,7 @@ export function MachineHealthReport() {
       <ReportFilters
         filters={filters}
         onChange={setFilters}
-        onResetAll={() => setFilters(DEFAULT_FILTERS)}
+        onResetAll={() => setFilters(getDefaultFilters())}
         technicians={data.technicians}
         customers={data.customers}
         parts={data.parts}
@@ -418,7 +426,7 @@ export function MachineHealthReport() {
                       <TableCell className='hidden md:table-cell'>{row.type}</TableCell>
                       <TableCell className='text-right'>{row.ticketCount}</TableCell>
                       <TableCell className='text-right'>{row.repeatIssueCount}</TableCell>
-                      <TableCell className='text-right'>{row.totalHours.toFixed(1)}h</TableCell>
+                      <TableCell className='text-right'>{row.totalHours.toFixed(2)}h</TableCell>
                       <TableCell className='text-right text-sm'>
                         {row.lastServiceDate ? (
                           <>
@@ -597,7 +605,7 @@ export function MachineHealthReport() {
                                                 <TableCell className='text-xs'>{log.technicianName}</TableCell>
                                                 <TableCell className='text-right'>
                                                   <Badge variant='outline' className='text-xs'>
-                                                    {log.hoursWorked?.toFixed(1) || '0.0'}h
+                                                    {log.hoursWorked?.toFixed(2) || '0.0'}h
                                                   </Badge>
                                                 </TableCell>
                                                 <TableCell className='text-xs'>

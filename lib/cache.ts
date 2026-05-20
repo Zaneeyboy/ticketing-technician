@@ -34,11 +34,13 @@ export function createCachedQuery<T>(fn: () => Promise<T>, tags: string[], keyPa
 }
 
 /**
- * Revalidate cache for specific data types
+ * Revalidate cache for specific data types.
+ * Uses { expire: 0 } for immediate expiration so mutations are visible on the very next request.
  */
 export async function revalidateCache(tags: string[]) {
   const { revalidateTag } = await import('next/cache');
-  // Next.js 16: revalidateTag now requires a second argument ('max' for unstable_cache tags).
-  const purge = revalidateTag as unknown as (tag: string, type: 'max') => void;
-  tags.forEach((tag) => purge(tag, 'max'));
+  // Next.js 16: pass { expire: 0 } to immediately expire the cache entry so the next
+  // request fetches fresh data rather than serving stale (stale-while-revalidate 'max').
+  const purge = revalidateTag as unknown as (tag: string, options: { expire: number }) => void;
+  tags.forEach((tag) => purge(tag, { expire: 0 }));
 }

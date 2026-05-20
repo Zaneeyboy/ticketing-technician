@@ -22,6 +22,7 @@ const STATUS_COLORS: Record<string, string> = {
   Assigned: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
   'In Progress': 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
   'Pending Parts': 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
+  'Signoff Required': 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-400',
   'Signed Off': 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-400',
   Closed: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
 };

@@ -111,7 +111,7 @@ function PartFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent aria-describedby={undefined}>
         <DialogHeader>
           <DialogTitle>{editingPart ? 'Edit Part' : 'Add New Part'}</DialogTitle>
         </DialogHeader>
@@ -288,7 +288,7 @@ export default function PartsPage() {
     return categoryColors[category] || 'bg-slate-100 text-slate-800 dark:bg-slate-900 dark:text-slate-200';
   };
 
-  const canWrite = ['super_admin', 'store_admin', 'store_manager'].includes(user?.role ?? '');
+  const canWrite = ['super_admin', 'store_admin', 'store_manager', 'call_admin'].includes(user?.role ?? '');
 
   const loadParts = useCallback(async () => {
     if (!user?.storeId) return;
@@ -632,7 +632,7 @@ export default function PartsPage() {
 
       {/* View Dialog */}
       <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
-        <DialogContent>
+        <DialogContent aria-describedby={undefined}>
           <DialogHeader>
             <DialogTitle>Part Details</DialogTitle>
           </DialogHeader>

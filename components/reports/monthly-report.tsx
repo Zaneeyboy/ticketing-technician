@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useReportData } from '@/components/reports/report-data-provider';
+import { calculateVisitStatus } from '@/lib/utils/visit-status';
 import { ExportButton } from '@/components/export-button';
 import { buildReportMetadata, type ExportColumn } from '@/lib/export';
 import { ArrowLeft, CalendarRange, Clock, TicketCheck, Users, Wrench } from 'lucide-react';
@@ -26,9 +27,11 @@ const TICKET_STATUS_EXPORT_COLUMNS: ExportColumn[] = [
 
 const TECH_SUMMARY_EXPORT_COLUMNS: ExportColumn[] = [
   { header: 'Technician', key: 'technicianName' },
-  { header: 'Visits Completed', key: 'visitsCompleted' },
   { header: 'Scheduled Visits', key: 'scheduledVisits' },
-  { header: 'Missed Visits', key: 'missedVisits' },
+  { header: 'On Time', key: 'onTimeVisits' },
+  { header: 'Rescheduled', key: 'rescheduledVisits' },
+  { header: 'Completed Late', key: 'lateVisits' },
+  { header: 'Overdue / Missed', key: 'overdueVisits' },
   { header: 'Visit Rate (%)', key: 'visitRate' },
   { header: 'Hours Logged', key: 'hoursLogged' },
 ];
@@ -124,43 +127,82 @@ export function MonthlyReport() {
 
   // ── Technician summary ────────────────────────────────────────────────────
   const techRows = useMemo(() => {
-    const techVisits: Record<string, Set<string>> = {};
-    const techHours: Record<string, number> = {};
-    monthWorkLogs.forEach((l) => {
-      const techId = l.recordedBy;
-      if (!techId) return;
-      if (!techVisits[techId]) techVisits[techId] = new Set();
-      techVisits[techId].add(l.ticketId);
-      techHours[techId] = (techHours[techId] ?? 0) + (l.hoursWorked ?? 0);
+    // Map of ticketId → all arrival time ISO strings across ALL work logs (not just month)
+    const workLogsByTicketId = new Map<string, (string | null | undefined)[]>();
+    data.workLogs.forEach((l) => {
+      const arr = workLogsByTicketId.get(l.ticketId) ?? [];
+      arr.push(l.arrivalTime);
+      workLogsByTicketId.set(l.ticketId, arr);
     });
 
-    // Scheduled visits: tickets with scheduledVisitDate in month assigned to that tech
-    const scheduledByTech: Record<string, number> = {};
+    // Hours by tech (from month work logs only)
+    const techHours: Record<string, number> = {};
+    monthWorkLogs.forEach((l) => {
+      if (l.recordedBy) techHours[l.recordedBy] = (techHours[l.recordedBy] ?? 0) + (l.hoursWorked ?? 0);
+    });
+
+    // Tickets with scheduledVisitDate in the selected month, grouped by assigned tech
+    const scheduledTicketsByTech: Record<string, typeof data.tickets> = {};
     data.tickets.forEach((t) => {
       if (t.assignedTo && inRange(t.scheduledVisitDate)) {
-        scheduledByTech[t.assignedTo] = (scheduledByTech[t.assignedTo] ?? 0) + 1;
+        if (!scheduledTicketsByTech[t.assignedTo]) scheduledTicketsByTech[t.assignedTo] = [];
+        scheduledTicketsByTech[t.assignedTo].push(t);
       }
     });
 
-    return Object.entries(techVisits)
-      .map(([techId, ticketSet]) => {
+    // Collect all techs that have either logged work or have scheduled tickets this month
+    const allTechIds = new Set([...(monthWorkLogs.map((l) => l.recordedBy).filter(Boolean) as string[]), ...Object.keys(scheduledTicketsByTech)]);
+
+    return Array.from(allTechIds)
+      .map((techId) => {
         const tech = technicianMap.get(techId);
-        const completed = ticketSet.size;
-        const scheduled = scheduledByTech[techId] ?? 0;
-        const missed = Math.max(0, scheduled - completed);
-        const visitRate = scheduled > 0 ? Math.round((completed / scheduled) * 100) : null;
+        const scheduledTickets = scheduledTicketsByTech[techId] ?? [];
+
+        let onTime = 0,
+          rescheduled = 0,
+          completedLate = 0,
+          overdue = 0;
+        scheduledTickets.forEach((t) => {
+          const arrivalTimes = workLogsByTicketId.get(t.id) ?? [];
+          const status = calculateVisitStatus(t, arrivalTimes);
+          if (status === 'on_time') onTime++;
+          else if (status === 'rescheduled') rescheduled++;
+          else if (status === 'completed_late') completedLate++;
+          else if (status === 'overdue') overdue++;
+        });
+
+        const scheduled = scheduledTickets.length;
+        const visitRate = scheduled > 0 ? Math.round(((onTime + completedLate) / scheduled) * 100) : null;
+
         return {
           technicianId: techId,
           technicianName: tech?.name ?? 'Unknown',
-          visitsCompleted: completed,
           scheduledVisits: scheduled,
-          missedVisits: missed,
+          onTimeVisits: onTime,
+          rescheduledVisits: rescheduled,
+          lateVisits: completedLate,
+          overdueVisits: overdue,
           visitRate,
           hoursLogged: parseFloat((techHours[techId] ?? 0).toFixed(2)),
         };
       })
-      .sort((a, b) => b.visitsCompleted - a.visitsCompleted);
-  }, [monthWorkLogs, data.tickets, monthStart, monthEnd, technicianMap]);
+      .filter((r) => r.scheduledVisits > 0 || r.hoursLogged > 0)
+      .sort((a, b) => b.scheduledVisits - a.scheduledVisits || b.hoursLogged - a.hoursLogged);
+  }, [monthWorkLogs, data.tickets, data.workLogs, monthStart, monthEnd, technicianMap]);
+
+  // ── Visit quality totals (for summary card) ───────────────────────────────
+  const visitQualityTotals = useMemo(() => {
+    return techRows.reduce(
+      (acc, r) => ({
+        scheduled: acc.scheduled + r.scheduledVisits,
+        onTime: acc.onTime + r.onTimeVisits,
+        rescheduled: acc.rescheduled + r.rescheduledVisits,
+        late: acc.late + r.lateVisits,
+        overdue: acc.overdue + r.overdueVisits,
+      }),
+      { scheduled: 0, onTime: 0, rescheduled: 0, late: 0, overdue: 0 },
+    );
+  }, [techRows]);
 
   // ── Top parts ─────────────────────────────────────────────────────────────
   const topParts = useMemo(() => {
@@ -301,7 +343,7 @@ export function MonthlyReport() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className='text-2xl font-semibold'>{totalHours.toFixed(1)}h</div>
+            <div className='text-2xl font-semibold'>{totalHours.toFixed(2)}h</div>
             <p className='text-xs text-muted-foreground mt-0.5'>Across all work visits</p>
           </CardContent>
         </Card>
@@ -380,57 +422,94 @@ export function MonthlyReport() {
           {techRows.length === 0 ? (
             <div className='flex flex-col items-center gap-2 py-8 text-muted-foreground'>
               <Users className='h-8 w-8 opacity-30' />
-              <p className='text-sm font-medium'>No work logged this month</p>
+              <p className='text-sm font-medium'>No scheduled visits or work logged this month</p>
             </div>
           ) : (
-            <div className='border rounded-lg overflow-x-auto'>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Technician</TableHead>
-                    <TableHead className='text-right'>Visits Done</TableHead>
-                    <TableHead className='text-right hidden sm:table-cell'>Scheduled</TableHead>
-                    <TableHead className='text-right hidden sm:table-cell'>Missed</TableHead>
-                    <TableHead className='text-right'>Visit Rate</TableHead>
-                    <TableHead className='text-right hidden md:table-cell'>Hours</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {techRows.map((row) => (
-                    <TableRow key={row.technicianId}>
-                      <TableCell className='font-medium'>
-                        <div>{row.technicianName}</div>
-                        <div className='text-xs text-muted-foreground md:hidden'>{row.hoursLogged.toFixed(1)}h logged</div>
-                      </TableCell>
-                      <TableCell className='text-right'>{row.visitsCompleted}</TableCell>
-                      <TableCell className='text-right hidden sm:table-cell text-muted-foreground'>{row.scheduledVisits}</TableCell>
-                      <TableCell className='text-right hidden sm:table-cell'>
-                        {row.missedVisits > 0 ? <span className='text-destructive font-medium'>{row.missedVisits}</span> : <span className='text-muted-foreground'>0</span>}
-                      </TableCell>
-                      <TableCell className='text-right'>
-                        {row.visitRate !== null ? (
-                          <Badge
-                            variant='outline'
-                            className={
-                              row.visitRate >= 80
-                                ? 'bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/30'
-                                : row.visitRate >= 60
-                                  ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30'
-                                  : 'bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/30'
-                            }
-                          >
-                            {row.visitRate}%
-                          </Badge>
-                        ) : (
-                          <span className='text-muted-foreground text-xs'>—</span>
-                        )}
-                      </TableCell>
-                      <TableCell className='text-right hidden md:table-cell'>{row.hoursLogged.toFixed(1)}h</TableCell>
+            <>
+              {/* Visit quality summary strip */}
+              {visitQualityTotals.scheduled > 0 && (
+                <div className='grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4'>
+                  <div className='rounded-lg border bg-green-500/5 border-green-500/20 px-3 py-2'>
+                    <p className='text-xs text-muted-foreground'>On Time</p>
+                    <p className='text-xl font-semibold text-green-700 dark:text-green-400'>{visitQualityTotals.onTime}</p>
+                  </div>
+                  <div className='rounded-lg border bg-blue-500/5 border-blue-500/20 px-3 py-2'>
+                    <p className='text-xs text-muted-foreground'>Rescheduled</p>
+                    <p className='text-xl font-semibold text-blue-700 dark:text-blue-400'>{visitQualityTotals.rescheduled}</p>
+                  </div>
+                  <div className='rounded-lg border bg-amber-500/5 border-amber-500/20 px-3 py-2'>
+                    <p className='text-xs text-muted-foreground'>Completed Late</p>
+                    <p className='text-xl font-semibold text-amber-700 dark:text-amber-400'>{visitQualityTotals.late}</p>
+                  </div>
+                  <div className='rounded-lg border bg-red-500/5 border-red-500/20 px-3 py-2'>
+                    <p className='text-xs text-muted-foreground'>Overdue / Missed</p>
+                    <p className='text-xl font-semibold text-red-700 dark:text-red-400'>{visitQualityTotals.overdue}</p>
+                  </div>
+                </div>
+              )}
+              <div className='border rounded-lg overflow-x-auto'>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Technician</TableHead>
+                      <TableHead className='text-right'>Scheduled</TableHead>
+                      <TableHead className='text-right hidden sm:table-cell text-green-700 dark:text-green-400'>On Time</TableHead>
+                      <TableHead className='text-right hidden md:table-cell text-blue-700 dark:text-blue-400'>Rescheduled</TableHead>
+                      <TableHead className='text-right hidden md:table-cell text-amber-700 dark:text-amber-400'>Late</TableHead>
+                      <TableHead className='text-right hidden sm:table-cell text-red-700 dark:text-red-400'>Overdue</TableHead>
+                      <TableHead className='text-right'>Visit Rate</TableHead>
+                      <TableHead className='text-right hidden lg:table-cell'>Hours</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                  </TableHeader>
+                  <TableBody>
+                    {techRows.map((row) => (
+                      <TableRow key={row.technicianId}>
+                        <TableCell className='font-medium'>
+                          <div>{row.technicianName}</div>
+                          <div className='text-xs text-muted-foreground lg:hidden'>{row.hoursLogged.toFixed(2)}h logged</div>
+                        </TableCell>
+                        <TableCell className='text-right text-muted-foreground'>{row.scheduledVisits}</TableCell>
+                        <TableCell className='text-right hidden sm:table-cell'>
+                          {row.onTimeVisits > 0 ? <span className='text-green-600 dark:text-green-400 font-medium'>{row.onTimeVisits}</span> : <span className='text-muted-foreground'>0</span>}
+                        </TableCell>
+                        <TableCell className='text-right hidden md:table-cell'>
+                          {row.rescheduledVisits > 0 ? <span className='text-blue-600 dark:text-blue-400 font-medium'>{row.rescheduledVisits}</span> : <span className='text-muted-foreground'>0</span>}
+                        </TableCell>
+                        <TableCell className='text-right hidden md:table-cell'>
+                          {row.lateVisits > 0 ? <span className='text-amber-600 dark:text-amber-400 font-medium'>{row.lateVisits}</span> : <span className='text-muted-foreground'>0</span>}
+                        </TableCell>
+                        <TableCell className='text-right hidden sm:table-cell'>
+                          {row.overdueVisits > 0 ? (
+                            <span className='text-red-600 dark:text-red-400 font-medium'>{row.overdueVisits}</span>
+                          ) : (
+                            <span className='text-green-600 dark:text-green-400'>0</span>
+                          )}
+                        </TableCell>
+                        <TableCell className='text-right'>
+                          {row.visitRate !== null ? (
+                            <Badge
+                              variant='outline'
+                              className={
+                                row.visitRate >= 80
+                                  ? 'bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/30'
+                                  : row.visitRate >= 60
+                                    ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30'
+                                    : 'bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/30'
+                              }
+                            >
+                              {row.visitRate}%
+                            </Badge>
+                          ) : (
+                            <span className='text-muted-foreground text-xs'>—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className='text-right hidden lg:table-cell'>{row.hoursLogged.toFixed(2)}h</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { useDebounce } from '@/lib/hooks/useDebounce';
-import { collection, query, where, orderBy, getDocs } from 'firebase/firestore';
+import { collection, query, where, orderBy, getDocs, documentId } from 'firebase/firestore';
 import { db } from '@/lib/firebase/client';
 import { Ticket } from '@/lib/types';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -19,8 +19,33 @@ import { ViewTicketModal } from './view-ticket-modal';
 import { LogWorkModal } from './log-work-modal';
 import { SignOffLinkModal } from './sign-off-link-modal';
 import { ShareTicketDialog } from '@/components/share-ticket-dialog';
-import { getCustomersForTickets, getTechniciansForAssignment, CustomerForTicket, TechnicianForTicket, closeTicket, adminForceCloseTicket } from '@/lib/actions/tickets';
-import { Plus, ArrowUpDown, ChevronsUpDown, ClipboardList, CheckCircle2, AlertTriangle, UserCheck as UserCheckIcon, Share2, Wrench, Pencil, XCircle } from 'lucide-react';
+import {
+  getCustomersForTickets,
+  getTechniciansForAssignment,
+  CustomerForTicket,
+  TechnicianForTicket,
+  closeTicket,
+  adminForceCloseTicket,
+  markVisitMissed,
+  generateSignOffToken,
+} from '@/lib/actions/tickets';
+import {
+  Plus,
+  ArrowUpDown,
+  ChevronsUpDown,
+  ClipboardList,
+  CheckCircle2,
+  AlertTriangle,
+  UserCheck as UserCheckIcon,
+  Share2,
+  Wrench,
+  Pencil,
+  XCircle,
+  Eye,
+  MapPin,
+  Link2,
+  RefreshCw,
+} from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { PageHeader } from '@/components/page-header';
@@ -43,6 +68,25 @@ import {
   PaginationState,
   flexRender,
 } from '@tanstack/react-table';
+
+async function enrichCreatorNames(tickets: Ticket[]): Promise<Ticket[]> {
+  const missing = tickets.filter((t) => !t.createdByName && (t as any).createdBy);
+  if (missing.length === 0) return tickets;
+  const uniqueIds = [...new Set(missing.map((t) => (t as any).createdBy as string))];
+  const nameMap: Record<string, string> = {};
+  try {
+    for (let i = 0; i < uniqueIds.length; i += 30) {
+      const chunk = uniqueIds.slice(i, i + 30);
+      const snap = await getDocs(query(collection(db, 'users'), where(documentId(), 'in', chunk)));
+      snap.docs.forEach((d) => {
+        nameMap[d.id] = d.data().name || d.data().email || '';
+      });
+    }
+  } catch {
+    // silently skip enrichment on error
+  }
+  return tickets.map((t) => (!t.createdByName && (t as any).createdBy && nameMap[(t as any).createdBy] ? { ...t, createdByName: nameMap[(t as any).createdBy] } : t));
+}
 
 export default function TicketsPage() {
   const { user } = useAuth();
@@ -73,6 +117,8 @@ export default function TicketsPage() {
   const [signOffModalOpen, setSignOffModalOpen] = useState(false);
   const [signOffUrl, setSignOffUrl] = useState<string | null>(null);
   const [signOffTicketNumber, setSignOffTicketNumber] = useState('');
+  const [signOffTicketId, setSignOffTicketId] = useState('');
+  const [signOffExpiresAt, setSignOffExpiresAt] = useState<Date | null>(null);
 
   useEffect(() => {
     if (user?.uid) {
@@ -156,7 +202,7 @@ export default function TicketsPage() {
 
       console.log(`[TicketsPage] Successfully loaded ${ticketsData.length} tickets`);
       clearTimeout(timeoutId);
-      setTickets(ticketsData);
+      setTickets(await enrichCreatorNames(ticketsData));
       setLoading(false);
     } catch (error: any) {
       console.error('[TicketsPage] Error loading tickets with query:', error);
@@ -193,7 +239,7 @@ export default function TicketsPage() {
 
         console.log(`[TicketsPage] Fallback loaded ${filteredTickets.length} tickets`);
         clearTimeout(timeoutId);
-        setTickets(filteredTickets);
+        setTickets(await enrichCreatorNames(filteredTickets));
         setLoading(false);
       } catch (fallbackError: any) {
         console.error('[TicketsPage] Fallback loading also failed:', fallbackError);
@@ -211,6 +257,8 @@ export default function TicketsPage() {
         return 'bg-amber-500/15 text-amber-700 dark:text-amber-400';
       case 'Assigned':
         return 'bg-primary/10 text-primary dark:bg-primary/15';
+      case 'Signoff Required':
+        return 'bg-violet-500/15 text-violet-700 dark:text-violet-400';
       case 'Signed Off':
         return 'bg-violet-500/15 text-violet-700 dark:text-violet-400';
       case 'Closed':
@@ -253,6 +301,37 @@ export default function TicketsPage() {
   const handleShareTicket = (ticket: Ticket) => {
     setShareTicket(ticket);
     setShareDialogOpen(true);
+  };
+
+  const handleGetSignOffLink = (ticket: Ticket) => {
+    // Use the token already stored on the ticket — no server round-trip needed.
+    const signOffLink = (ticket as any).signOffLink as { token?: string; expiresAt?: any } | undefined;
+    const token = signOffLink?.token;
+    const rawExpiry = signOffLink?.expiresAt;
+    const expiresAt: Date | null = rawExpiry ? (typeof rawExpiry.toDate === 'function' ? rawExpiry.toDate() : rawExpiry instanceof Date ? rawExpiry : null) : null;
+
+    if (token) {
+      const url = `${window.location.origin}/sign-off/${token}`;
+      setSignOffUrl(url);
+      setSignOffTicketNumber(ticket.ticketNumber || ticket.id);
+      setSignOffTicketId(ticket.id);
+      setSignOffExpiresAt(expiresAt);
+      setSignOffModalOpen(true);
+    } else {
+      // Fallback: generate a new token (edge case — should not normally happen)
+      generateSignOffToken(ticket.id).then((result) => {
+        if (result.success && result.token) {
+          const url = `${window.location.origin}/sign-off/${result.token}`;
+          setSignOffUrl(url);
+          setSignOffTicketNumber(ticket.ticketNumber || ticket.id);
+          setSignOffTicketId(ticket.id);
+          setSignOffExpiresAt(null);
+          setSignOffModalOpen(true);
+        } else {
+          showToast.error(result.error || 'Failed to get sign-off link');
+        }
+      });
+    }
   };
 
   const handleCloseSignedOffTicket = async (ticket: Ticket) => {
@@ -460,9 +539,49 @@ export default function TicketsPage() {
           const ticket = row.original;
           const isAssignedTechnic = user?.role === 'technician' && ticket.assignedTo === user?.uid;
 
+          // Determine if the Mark Missed button should show
+          const scheduledDate = ticket.scheduledVisitDate ? (ticket.scheduledVisitDate instanceof Date ? ticket.scheduledVisitDate : ((ticket.scheduledVisitDate as any).toDate?.() ?? null)) : null;
+          const scheduledDateStr = scheduledDate ? scheduledDate.toISOString().slice(0, 10) : null;
+          const todayStr = new Date().toISOString().slice(0, 10);
+          const isPastScheduled = scheduledDateStr !== null && scheduledDateStr < todayStr;
+          const alreadyMarkedMissed = Array.isArray((ticket as any).missedVisits) && (ticket as any).missedVisits.includes(scheduledDateStr);
+          const canMarkMissed = isAssignedTechnic && ticket.status !== 'Closed' && ticket.status !== 'Signed Off' && ticket.status !== 'Signoff Required' && isPastScheduled && !alreadyMarkedMissed;
+
           return (
             <div className='flex gap-2'>
-              {isAssignedTechnic && ticket.status !== 'Closed' && ticket.status !== 'Signed Off' && !(ticket as any).signOffLink && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant='ghost' size='sm' onClick={() => handleViewTicket(ticket)} className='gap-1.5'>
+                    <Eye className='h-4 w-4 shrink-0' />
+                    <span className='hidden sm:inline'>View</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>View ticket details</TooltipContent>
+              </Tooltip>
+              {canMarkMissed && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant='ghost'
+                      size='sm'
+                      className='gap-1.5 text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/30'
+                      onClick={async () => {
+                        const res = await markVisitMissed(ticket.id, scheduledDateStr!);
+                        if (res.success) {
+                          showToast.success('Visit marked as missed');
+                        } else {
+                          showToast.error(res.error || 'Failed to mark missed');
+                        }
+                      }}
+                    >
+                      <MapPin className='h-4 w-4 shrink-0' />
+                      <span className='hidden sm:inline'>Mark Missed</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Mark scheduled visit ({scheduledDateStr}) as missed</TooltipContent>
+                </Tooltip>
+              )}
+              {isAssignedTechnic && ticket.status !== 'Closed' && ticket.status !== 'Signed Off' && ticket.status !== 'Signoff Required' && !(ticket as any).signOffLink && (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button variant='ghost' size='sm' onClick={() => handleLogWork(ticket)} className='gap-1.5 text-blue-600 hover:text-blue-700'>
@@ -473,36 +592,65 @@ export default function TicketsPage() {
                   <TooltipContent>Log work performed on this ticket</TooltipContent>
                 </Tooltip>
               )}
-              {ticket.status === 'Signed Off' && (isAssignedTechnic || user?.role === 'store_admin' || user?.role === 'super_admin' || user?.role === 'store_manager') && (
+              {(isAssignedTechnic || user?.role === 'store_admin' || user?.role === 'store_manager' || user?.role === 'call_admin' || user?.role === 'super_admin') &&
+                ticket.status === 'Signoff Required' && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant='ghost'
+                        size='sm'
+                        className='gap-1.5 text-violet-600 dark:text-violet-400 hover:text-violet-700 dark:hover:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-950/30'
+                        onClick={() => handleGetSignOffLink(ticket)}
+                      >
+                        <Link2 className='h-4 w-4 shrink-0' />
+                        <span className='hidden sm:inline'>Sign-Off Link</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Get sign-off link to share with customer</TooltipContent>
+                  </Tooltip>
+                )}
+              {/* Force-close for admins when waiting for sign-off */}
+              {(user?.role === 'store_admin' || user?.role === 'super_admin' || user?.role === 'store_manager') && ticket.status === 'Signoff Required' && (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant='ghost' size='sm' onClick={() => handleCloseSignedOffTicket(ticket)} className='gap-1.5 text-emerald-600 hover:text-emerald-700'>
+                    <Button
+                      variant='ghost'
+                      size='sm'
+                      className='gap-1.5 text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/30'
+                      onClick={() => handleCloseSignedOffTicket(ticket)}
+                    >
                       <XCircle className='h-4 w-4 shrink-0' />
                       <span className='hidden sm:inline'>Close</span>
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>Close this signed-off ticket</TooltipContent>
+                  <TooltipContent>Force-close ticket without customer sign-off</TooltipContent>
                 </Tooltip>
               )}
-              {(user?.role === 'store_admin' || user?.role === 'super_admin' || user?.role === 'call_admin' || user?.role === 'store_manager') && (
+              {/* Signoff Required, Signed Off, and Closed are all terminal — no Edit button */}
+              {(user?.role === 'store_admin' || user?.role === 'super_admin' || user?.role === 'call_admin' || user?.role === 'store_manager') &&
+                ticket.status !== 'Closed' &&
+                ticket.status !== 'Signed Off' &&
+                ticket.status !== 'Signoff Required' && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant='ghost' size='sm' onClick={() => handleEditTicket(ticket)} className='gap-1.5'>
+                        <Pencil className='h-4 w-4 shrink-0' />
+                        <span className='hidden sm:inline'>Edit</span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Edit ticket</TooltipContent>
+                  </Tooltip>
+                )}
+              {ticket.status !== 'Closed' && ticket.status !== 'Signed Off' && ticket.status !== 'Signoff Required' && (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button variant='ghost' size='sm' onClick={() => handleEditTicket(ticket)} className='gap-1.5'>
-                      <Pencil className='h-4 w-4 shrink-0' />
-                      <span className='hidden sm:inline'>Edit</span>
+                    <Button variant='ghost' size='icon' className='h-8 w-8 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 hover:text-primary' onClick={() => handleShareTicket(ticket)}>
+                      <Share2 className='h-3.5 w-3.5' />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>Edit ticket</TooltipContent>
+                  <TooltipContent>Share ticket via WhatsApp or Email</TooltipContent>
                 </Tooltip>
               )}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant='ghost' size='icon' className='h-8 w-8 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 hover:text-primary' onClick={() => handleShareTicket(ticket)}>
-                    <Share2 className='h-3.5 w-3.5' />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Share ticket via WhatsApp or Email</TooltipContent>
-              </Tooltip>
             </div>
           );
         },
@@ -664,10 +812,15 @@ export default function TicketsPage() {
                   {filteredByStatus.length} result{filteredByStatus.length !== 1 ? 's' : ''}
                 </p>
               </div>
-              <Input placeholder='Search by number, customer, machine, or issue...' value={globalFilter} onChange={(e) => setGlobalFilter(e.target.value)} className='sm:max-w-xs' />
+              <div className='flex items-center gap-2'>
+                <Input placeholder='Search by number, customer, machine, or issue...' value={globalFilter} onChange={(e) => setGlobalFilter(e.target.value)} className='sm:max-w-xs' />
+                <Button size='icon' variant='outline' onClick={() => loadTickets()} disabled={loading} title='Refresh tickets' className='shrink-0 h-9 w-9'>
+                  <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                </Button>
+              </div>
             </div>
             <div className='flex flex-wrap items-center gap-2'>
-              {(['all', 'Open', 'Assigned', 'Signed Off', 'Closed'] as const).map((s) => {
+              {(['all', 'Open', 'Assigned', 'Signoff Required', 'Signed Off', 'Closed'] as const).map((s) => {
                 const count = s === 'all' ? tickets.length : tickets.filter((t) => t.status === s).length;
                 return (
                   <button
@@ -783,12 +936,26 @@ export default function TicketsPage() {
           onSignOffGenerated={(url, ticketNumber) => {
             setSignOffUrl(url);
             setSignOffTicketNumber(ticketNumber);
+            setSignOffTicketId(selectedTicket.id);
+            setSignOffExpiresAt(null); // freshly generated — no expiry to worry about
             setSignOffModalOpen(true);
             loadTickets(); // refresh ticket list so Log Work button hides
           }}
         />
       )}
-      <SignOffLinkModal isOpen={signOffModalOpen} onClose={() => setSignOffModalOpen(false)} url={signOffUrl ?? ''} ticketNumber={signOffTicketNumber} />
+      <SignOffLinkModal
+        isOpen={signOffModalOpen}
+        onClose={() => setSignOffModalOpen(false)}
+        url={signOffUrl ?? ''}
+        ticketNumber={signOffTicketNumber}
+        ticketId={signOffTicketId}
+        expiresAt={signOffExpiresAt}
+        onRegenerated={(newUrl) => {
+          setSignOffUrl(newUrl);
+          setSignOffExpiresAt(null); // fresh link — reset expiry
+          loadTickets();
+        }}
+      />
       <ShareTicketDialog open={shareDialogOpen} onOpenChange={setShareDialogOpen} ticketData={shareTicket} />
     </DashboardLayout>
   );

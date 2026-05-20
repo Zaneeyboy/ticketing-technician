@@ -20,6 +20,8 @@ export interface ReportTicket {
   assignedToName?: string | null;
   issueDescription?: string | null;
   machines: ReportTicketMachine[];
+  /** Each entry records a previously scheduled date that was replaced. Used for missed-visit reporting. */
+  scheduleHistory?: { previousDate: string; rescheduledAt: string }[];
 }
 
 export interface ReportWorkLogPart {

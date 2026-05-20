@@ -42,20 +42,31 @@ export interface DailyReportTicket {
   briefDescription: string | null;
   contactPerson: string | null;
   machines: DailyReportMachine[];
+  missedVisits: string[]; // explicit missed dates — YYYY-MM-DD
 }
 
 export type DailyVisitType = 'scheduled' | 'emergency';
 
+/**
+ * Primary classification used in the report and export.
+ *
+ * visited_scheduled — had a scheduledVisitDate in the range and work was logged on a date in the range
+ * visited_emergency — no scheduledVisitDate in the range; tech showed up unscheduled
+ * not_visited       — had a scheduledVisitDate for this date but no work was logged (missed visit)
+ */
+export type VisitActivity = 'visited_scheduled' | 'visited_emergency' | 'not_visited';
+
 export interface DailyTicketEntry {
   ticket: DailyReportTicket;
   workLogs: DailyReportWorkLog[];
-  visitType: DailyVisitType;
+  visitType: DailyVisitType; // kept for backwards compat; derived from visitActivity
+  visitActivity: VisitActivity;
 }
 
 export interface TechDayEntry {
   dateStr: string;
-  scheduledCount: number;
-  notCompletedCount: number;
+  visitedScheduledCount: number;
+  missedCount: number;
   emergencyCount: number;
   hoursLogged: number;
   tickets: DailyTicketEntry[];
@@ -64,8 +75,10 @@ export interface TechDayEntry {
 export interface TechnicianPeriodRow {
   technicianId: string;
   technicianName: string;
-  totalScheduled: number;
-  totalNotCompleted: number;
+  totalScheduled: number; // visitedScheduled + missed (all planned visits)
+  totalVisited: number; // visitedScheduled only (completed planned visits)
+  totalNotCompleted: number; // alias for totalMissed — kept for UI compat
+  totalMissed: number; // missed visits (scheduled, no work logged)
   totalEmergency: number;
   totalHours: number;
   totalTickets: number;
@@ -87,7 +100,9 @@ export interface PeriodServiceReportData {
   technicians: TechnicianPeriodRow[];
   unassignedDays: UnassignedDayGroup[];
   totalScheduled: number;
+  totalVisited: number;
   totalNotCompleted: number;
+  totalMissed: number;
   totalEmergency: number;
   totalHours: number;
   totalTickets: number;
@@ -106,18 +121,9 @@ function getDatesInRange(startDate: string, endDate: string): string[] {
   return dates;
 }
 
-/** Tickets with High or Urgent priority are always classified as emergency visits. */
-function isEmergencyPriority(ticket: DailyReportTicket): boolean {
-  return ticket.machines.some((m) => m.priority === 'High' || m.priority === 'Urgent');
-}
-
 // ─── Private fetcher (no auth, called via cached wrapper) ──────────────────
 
-async function _fetchReportData(
-  storeId: string,
-  startDate: string,
-  endDate: string,
-): Promise<PeriodServiceReportData> {
+async function _fetchReportData(storeId: string, startDate: string, endDate: string): Promise<PeriodServiceReportData> {
   const storeCol = (col: string) => adminDb.collection('stores').doc(storeId).collection(col);
 
   const toIso = (v: unknown): string | null => {
@@ -143,12 +149,7 @@ async function _fetchReportData(
   const [ticketsSnap, workLogsSnap, techSnap] = await Promise.all([
     storeCol('tickets').get(),
     storeCol('machineWorkLogs').get(),
-    adminDb
-      .collection('users')
-      .where('role', '==', 'technician')
-      .where('storeId', '==', storeId)
-      .where('disabled', '==', false)
-      .get(),
+    adminDb.collection('users').where('role', '==', 'technician').where('storeId', '==', storeId).where('disabled', '==', false).get(),
   ]);
 
   const techMap = new Map<string, string>();
@@ -170,6 +171,7 @@ async function _fetchReportData(
       issueDescription: (d.issueDescription as string) || '',
       briefDescription: (d.briefDescription as string) || null,
       contactPerson: (d.contactPerson as string) || null,
+      missedVisits: Array.isArray(d.missedVisits) ? (d.missedVisits as string[]) : [],
       machines: Array.isArray(d.machines)
         ? (d.machines as Record<string, unknown>[]).map((m) => ({
             machineId: (m.machineId as string) || '',
@@ -200,9 +202,7 @@ async function _fetchReportData(
       hoursWorked: typeof d.hoursWorked === 'number' ? (d.hoursWorked as number) : null,
       workPerformed: (d.workPerformed as string) || null,
       outcome: (d.outcome as string) || null,
-      partsUsed: Array.isArray(d.partsUsed)
-        ? (d.partsUsed as Array<{ partId: string; partName: string; quantity: number }>)
-        : [],
+      partsUsed: Array.isArray(d.partsUsed) ? (d.partsUsed as Array<{ partId: string; partName: string; quantity: number }>) : [],
     };
   });
 
@@ -245,8 +245,8 @@ async function _fetchReportData(
     if (!dayMap.has(dateStr)) {
       dayMap.set(dateStr, {
         dateStr,
-        scheduledCount: 0,
-        notCompletedCount: 0,
+        visitedScheduledCount: 0,
+        missedCount: 0,
         emergencyCount: 0,
         hoursLogged: 0,
         tickets: [],
@@ -256,9 +256,10 @@ async function _fetchReportData(
     const dayEntry = dayMap.get(dateStr)!;
     dayEntry.tickets.push(entry);
 
-    if (entry.visitType === 'scheduled') {
-      dayEntry.scheduledCount++;
-      if (entry.ticket.status !== 'Closed') dayEntry.notCompletedCount++;
+    if (entry.visitActivity === 'visited_scheduled') {
+      dayEntry.visitedScheduledCount++;
+    } else if (entry.visitActivity === 'not_visited') {
+      dayEntry.missedCount++;
     } else {
       dayEntry.emergencyCount++;
     }
@@ -271,36 +272,52 @@ async function _fetchReportData(
   const allDates = getDatesInRange(startDate, endDate);
   const processedPairs = new Set<string>();
 
+  // IDs of tickets that have a scheduledVisitDate anywhere in the range.
+  // Tickets worked on a non-scheduled day are a late visit (visited_scheduled),
+  // NOT an emergency — the scheduled entry on the original date handles not_visited.
+  const scheduledInRangeIds = new Set<string>(allTickets.filter((t) => isInRange(t.scheduledVisitDate)).map((t) => t.id));
+
   for (const dateStr of allDates) {
     const scheduledTickets = scheduledByDate.get(dateStr) ?? [];
     const workedTicketIds = workLogTicketsByDate.get(dateStr) ?? new Set<string>();
     const scheduledIds = new Set(scheduledTickets.map((t) => t.id));
 
+    // ── 1. Process scheduled visits for this date ──────────────────────────
     for (const ticket of scheduledTickets) {
       const key = `${ticket.id}:${dateStr}`;
       if (processedPairs.has(key)) continue;
       processedPairs.add(key);
-      // High/Urgent priority tickets are always emergency visits, even if scheduled.
-      const visitType: DailyVisitType = isEmergencyPriority(ticket) ? 'emergency' : 'scheduled';
-      addEntry(
-        { ticket, workLogs: workLogsByTicketByDate.get(ticket.id)?.get(dateStr) ?? [], visitType },
-        dateStr,
-        ticket.assignedTo,
-      );
+
+      const workLogsForDay = workLogsByTicketByDate.get(ticket.id)?.get(dateStr) ?? [];
+      const hasWork = workLogsForDay.length > 0;
+
+      // Missed if: explicitly marked OR no work logged for this scheduled date
+      const visitActivity: VisitActivity = hasWork ? 'visited_scheduled' : 'not_visited';
+      const visitType: DailyVisitType = 'scheduled';
+
+      addEntry({ ticket, workLogs: workLogsForDay, visitType, visitActivity }, dateStr, ticket.assignedTo);
     }
 
+    // ── 2. Process tickets worked on this date but not scheduled on this date ─
     for (const ticketId of workedTicketIds) {
-      if (scheduledIds.has(ticketId)) continue;
+      if (scheduledIds.has(ticketId)) continue; // already handled as scheduled above
+
       const key = `${ticketId}:${dateStr}`;
       if (processedPairs.has(key)) continue;
       processedPairs.add(key);
+
       const ticket = ticketById.get(ticketId);
       if (!ticket) continue;
-      addEntry(
-        { ticket, workLogs: workLogsByTicketByDate.get(ticketId)?.get(dateStr) ?? [], visitType: 'emergency' },
-        dateStr,
-        ticket.assignedTo,
-      );
+
+      const workLogsForDay = workLogsByTicketByDate.get(ticketId)?.get(dateStr) ?? [];
+
+      // If this ticket had a scheduled date elsewhere in the range, this is a late
+      // visit for a planned appointment — still classify as visited_scheduled.
+      // If no scheduled date at all → genuine emergency breakdown call.
+      const visitActivity: VisitActivity = scheduledInRangeIds.has(ticketId) ? 'visited_scheduled' : 'visited_emergency';
+      const visitType: DailyVisitType = scheduledInRangeIds.has(ticketId) ? 'scheduled' : 'emergency';
+
+      addEntry({ ticket, workLogs: workLogsForDay, visitType, visitActivity }, dateStr, ticket.assignedTo);
     }
   }
 
@@ -310,8 +327,9 @@ async function _fetchReportData(
     const techName = techMap.get(techId) ?? 'Unknown Technician';
     const days = Array.from(dayMap.values()).sort((a, b) => a.dateStr.localeCompare(b.dateStr));
 
-    const totalScheduled = days.reduce((s, d) => s + d.scheduledCount, 0);
-    const totalNotCompleted = days.reduce((s, d) => s + d.notCompletedCount, 0);
+    const totalVisited = days.reduce((s, d) => s + d.visitedScheduledCount, 0);
+    const totalMissed = days.reduce((s, d) => s + d.missedCount, 0);
+    const totalScheduled = totalVisited + totalMissed; // all planned visits
     const totalEmergency = days.reduce((s, d) => s + d.emergencyCount, 0);
     const totalHours = Math.round(days.reduce((s, d) => s + d.hoursLogged, 0) * 100) / 100;
     const totalTickets = days.reduce((s, d) => s + d.tickets.length, 0);
@@ -321,13 +339,15 @@ async function _fetchReportData(
       technicianId: techId,
       technicianName: techName,
       totalScheduled,
-      totalNotCompleted,
+      totalVisited,
+      totalNotCompleted: totalMissed, // alias kept for UI compat
+      totalMissed,
       totalEmergency,
       totalHours,
       totalTickets,
       activeDaysCount,
       avgScheduledPerDay: calendarDays > 0 ? Math.round((totalScheduled / calendarDays) * 10) / 10 : 0,
-      avgHoursPerDay: activeDaysCount > 0 ? Math.round((totalHours / activeDaysCount) * 10) / 10 : 0,
+      avgHoursPerDay: activeDaysCount > 0 ? Math.round((totalHours / activeDaysCount) * 100) / 100 : 0,
       days,
     };
   });
@@ -338,13 +358,12 @@ async function _fetchReportData(
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([dateStr, entries]) => ({ dateStr, entries }));
 
-  const totalScheduled = techRows.reduce((s, t) => s + t.totalScheduled, 0);
-  const totalNotCompleted = techRows.reduce((s, t) => s + t.totalNotCompleted, 0);
+  const totalVisited = techRows.reduce((s, t) => s + t.totalVisited, 0);
+  const totalMissed = techRows.reduce((s, t) => s + t.totalMissed, 0);
+  const totalScheduled = totalVisited + totalMissed;
   const totalEmergency = techRows.reduce((s, t) => s + t.totalEmergency, 0);
   const totalHours = Math.round(techRows.reduce((s, t) => s + t.totalHours, 0) * 100) / 100;
-  const totalTickets =
-    techRows.reduce((s, t) => s + t.totalTickets, 0) +
-    unassignedDays.reduce((s, d) => s + d.entries.length, 0);
+  const totalTickets = techRows.reduce((s, t) => s + t.totalTickets, 0) + unassignedDays.reduce((s, d) => s + d.entries.length, 0);
 
   return {
     startDate,
@@ -353,7 +372,9 @@ async function _fetchReportData(
     technicians: techRows,
     unassignedDays,
     totalScheduled,
-    totalNotCompleted,
+    totalVisited,
+    totalNotCompleted: totalMissed,
+    totalMissed,
     totalEmergency,
     totalHours,
     totalTickets,
@@ -370,7 +391,9 @@ export async function getServiceReport(startDate: string, endDate: string): Prom
     technicians: [],
     unassignedDays: [],
     totalScheduled: 0,
+    totalVisited: 0,
     totalNotCompleted: 0,
+    totalMissed: 0,
     totalEmergency: 0,
     totalHours: 0,
     totalTickets: 0,
@@ -384,14 +407,10 @@ export async function getServiceReport(startDate: string, endDate: string): Prom
   const storeId = user.storeId;
 
   // Cache per store + date range; invalidated when tickets or work logs change.
-  const getCached = unstable_cache(
-    () => _fetchReportData(storeId, startDate, endDate),
-    [`service-report:${storeId}:${startDate}:${endDate}`],
-    {
-      tags: [`${CACHE_TAGS.TICKETS}:${storeId}`, `${CACHE_TAGS.WORK_LOGS}:${storeId}`],
-      revalidate: false,
-    },
-  );
+  const getCached = unstable_cache(() => _fetchReportData(storeId, startDate, endDate), [`service-report:${storeId}:${startDate}:${endDate}`], {
+    tags: [`${CACHE_TAGS.TICKETS}:${storeId}`, `${CACHE_TAGS.WORK_LOGS}:${storeId}`],
+    revalidate: false,
+  });
 
   return getCached();
 }

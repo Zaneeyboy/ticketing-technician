@@ -114,6 +114,15 @@ service cloud.firestore {
         allow create, update: if isHQ() || ((isTechnician() || isStoreAdmin()) && belongsToStore(storeId));
         allow delete: if canWriteStore(storeId);
       }
+
+      // --- Maintenance Reminders --------------------------------------------
+      // One document per machine. Written server-side by Admin SDK when a
+      // technician submits a work log with a maintenance recommendation.
+      // Read client-side by the schedule page and create-ticket modal.
+      match /maintenanceReminders/{machineId} {
+        allow read: if canAccessStore(storeId);
+        allow write: if canWriteStore(storeId);
+      }
     }
 
     // --- Users (top-level, keyed by Firebase Auth UID) ------------------------
